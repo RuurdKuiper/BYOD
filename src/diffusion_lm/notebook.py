@@ -1,11 +1,42 @@
 """Small live dashboard used by the public training notebook."""
 from __future__ import annotations
 
+import importlib
+from importlib import metadata
 import json
 from pathlib import Path
 import subprocess
+import sys
 import time
 from typing import Sequence
+
+
+def remove_unused_transformer_engine() -> list[str]:
+    """Remove optional FP8 packages before non-FP8 notebook training.
+
+    PEFT probes installed Transformer Engine during import, even for ordinary
+    LoRA. A stale CUDA build can therefore break quick-mode training. Only call
+    this for a run that does not need Transformer Engine; leave PyTorch and its
+    CUDA dependencies installed. Training starts in a fresh subprocess.
+    """
+    installed = []
+    for name in (
+        "transformer-engine", "transformer-engine-torch",
+        "transformer-engine-cu12", "transformer-engine-cu13",
+    ):
+        try:
+            metadata.version(name)
+        except metadata.PackageNotFoundError:
+            continue
+        installed.append(name)
+    if installed:
+        print("Remove unused FP8 packages before training: " + ", ".join(installed), flush=True)
+        subprocess.run(
+            [sys.executable, "-m", "pip", "uninstall", "-y", *installed],
+            check=True,
+        )
+        importlib.invalidate_caches()
+    return installed
 
 
 def _records(path: Path) -> list[dict]:

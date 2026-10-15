@@ -79,6 +79,14 @@ leaves absent or newer installations alone. The checkout's root and `src` paths
 are added to the running kernel explicitly, so editable installation does not
 require restarting the kernel just to discover `diffusion_lm`.
 
+Before quick-mode training (and paper-mode BF16 fallback), the notebook also
+removes any previously installed Transformer Engine packages. Skipping a new
+install alone is insufficient: PEFT probes an existing Transformer Engine during
+import, and an incompatible CUDA build can fail even with FP8 disabled. This
+cleanup runs again in the training cell so it works even if the optional setup
+cell was skipped. It leaves PyTorch and its CUDA dependencies installed. Native
+FP8 paper runs retain Transformer Engine.
+
 Faster installation does not remove model/data download time or shorten the
 25,000-update training schedule. For a brief CLI smoke run, use
 `python train.py --model llama --mode quick --max-updates 2`.
