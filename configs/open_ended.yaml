@@ -1,0 +1,27 @@
+# 100 fixed prompts, 128-token answers, 64 denoising evaluations.
+outputs_dir: outputs
+models: [llama-3.1-8b-mask/best]
+tasks: [open_ended]
+split: test
+limit: 100
+device: auto
+cache_dir: data/huggingface
+results_dir: outputs/benchmark_runs
+include_autoregressive: true
+show_open_ended_answers: true
+diffusion_sampler: llada_official
+mask_only_generation: {temperature: 0.0, cfg_scale: 0.0, remasking: low_confidence}
+llada_generation: {temperature: 0.0, cfg_scale: 0.0, remasking: low_confidence, eot_token_id: 126348}
+mask_only_task_generation:
+  open_ended: &open_ended {temperature: 0.7, max_new_tokens: 128, num_steps: 64, block_length: 128, confidence_eos_eot_inf: true, repetition_penalty: 1.0}
+llada_task_generation:
+  open_ended: *open_ended
+autoregressive_task_generation:
+  open_ended: {max_new_tokens: 128}
+perplexity:
+  model_name_or_path: microsoft/phi-4
+  tokenizer_name_or_path: microsoft/phi-4
+  quantization: 4bit
+  precision: bf16
+  cache_dir: base_models
+open_ended_judge: {enabled: false}

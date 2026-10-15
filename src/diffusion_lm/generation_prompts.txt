@@ -1,0 +1,101 @@
+# Shared ordered questions for training validation and open-ended benchmarks.
+What do you know about Amsterdam?
+Why is the sky blue?
+How do plants convert sunlight into energy?
+What makes a good friend?
+Explain how a refrigerator keeps food cold.
+Why do we have different seasons on Earth?
+How does vaccination help protect a population?
+What is the difference between weather and climate?
+Explain the basic idea behind supply and demand.
+How does a search engine find relevant web pages?
+What causes a rainbow?
+How does the human heart circulate blood?
+Why do objects fall toward the ground?
+Explain what machine learning is in simple terms.
+What are the main benefits of regular exercise?
+How does the water cycle work?
+Why is sleep important for people?
+Explain the difference between renewable and nonrenewable energy.
+How do trees communicate or share resources?
+What is inflation and how does it affect households?
+Why do leaves change color in autumn?
+How does a bicycle stay balanced while moving?
+What are practical ways to reduce household waste?
+Explain how an electric battery stores and releases energy.
+What is the purpose of the scientific method?
+How do languages change over time?
+Why are oceans important to the global climate?
+What makes an explanation clear and persuasive?
+How can someone evaluate whether an online claim is reliable?
+Tell a short story about a traveler who learns an unexpected lesson.
+Why do ocean tides rise and fall?
+How does the immune system distinguish threats from the body's own cells?
+Explain how GPS determines a person's location.
+What causes earthquakes, and why are some more destructive than others?
+What are the important differences between bacteria and viruses?
+Why does metal rust, and how can rust be prevented?
+What happens behind the scenes when someone opens a web page?
+How does an airplane generate enough lift to fly?
+What makes an ecosystem resilient to change?
+Why are checks and balances important in a democracy?
+Explain how compound interest affects savings and debt over time.
+How does antibiotic resistance develop and spread?
+How are memories formed, strengthened, and sometimes forgotten?
+Why can music evoke strong emotions and memories?
+How do bridges distribute loads without collapsing?
+What happens during fermentation, and how is it used in food production?
+Why does the Moon appear to change shape during the month?
+Why do flat maps distort the size or shape of countries?
+How do clouds form, and what makes them produce rain or snow?
+Why are coral reefs important, and what threatens them?
+Explain the basic idea of encryption and why it matters online.
+How can a speculative financial bubble form and eventually burst?
+What makes public transportation effective in a growing city?
+Why is translating meaning between languages often difficult?
+How do fingerprints form, and why are they useful for identification?
+How does sound travel through air, water, and solid materials?
+How can scientists detect a black hole if it emits no light?
+What can recycling accomplish, and what are its main limitations?
+What is the purpose of a jury in a legal system?
+How can prolonged stress affect the body and decision-making?
+How does probability help people make decisions under uncertainty?
+Why do satellites remain in orbit instead of falling straight to Earth?
+How does cooking change the chemistry and texture of food?
+How can buildings be designed to withstand earthquakes?
+How can an invasive species disrupt an established ecosystem?
+Why do antibiotics work against bacteria but not viruses?
+How do melting glaciers and ice sheets affect sea level?
+How does a programmer systematically find and fix a software bug?
+What are the main benefits and drawbacks of nuclear energy?
+Why can historians disagree even when they study the same event?
+What is a feedback loop, and how can one amplify climate change?
+How do central banks use interest rates to influence an economy?
+Why do optical illusions cause us to perceive something inaccurately?
+How do migrating animals navigate across very long distances?
+What is the difference between a scientific hypothesis and a scientific theory?
+What does peer review contribute to scientific research, and what can it not guarantee?
+What practical steps can people take to protect their privacy online?
+What causes the urban heat-island effect, and how can cities reduce it?
+How do soil organisms and nutrients contribute to plant growth?
+Why do stars have different colors and brightnesses?
+What is an economic externality, and why can it lead to inefficient outcomes?
+Why do constitutions protect certain rights from ordinary political decisions?
+How can a neural network perform well on examples it has not seen before?
+Why do rechargeable batteries gradually lose capacity?
+What makes large-scale desalination useful but challenging?
+Why can an infectious disease outbreak grow exponentially at first?
+How do habits form, and what can help someone change an unwanted habit?
+How did people navigate over long distances before modern instruments?
+Why is humor especially difficult to translate between cultures?
+How should a team approach a disagreement when several solutions seem reasonable?
+What is confirmation bias, and how can someone reduce its influence?
+How do museums preserve fragile objects for future generations?
+Why do calendars need leap years?
+How does a wind turbine turn moving air into electrical energy?
+How does ocean acidification affect marine life?
+Explain the relationship between DNA, genes, and chromosomes using a simple analogy.
+Tell a short story about someone discovering a message in an abandoned lighthouse.
+Design a fair experiment to test how the amount of light affects plant growth.
+Why does misinformation spread, and what can people do to avoid sharing it?
+What is the difference between deductive and inductive reasoning?

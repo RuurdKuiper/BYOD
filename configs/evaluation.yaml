@@ -1,0 +1,29 @@
+# Nine-task paired evaluation. Set models to the adapters you have trained.
+outputs_dir: outputs
+models:
+  - llama-3.1-8b-mask/best
+  # - gemma-2-9b-mask/best
+  # - qwen-2.5-7b-mask/best
+  # - ministral-8b-mask/best
+  # - llada:GSAI-ML/LLaDA-8B-Instruct
+tasks: [mmlu, mmlu_pro, hellaswag, arc_c, gsm8k, math, gpqa, humaneval, mbpp]
+split: test
+limit: 125
+device: auto
+cache_dir: data/huggingface
+results_dir: outputs/benchmark_runs
+include_autoregressive: true
+diffusion_sampler: llada_official
+mask_only_generation: {temperature: 0.0, cfg_scale: 0.0, remasking: low_confidence}
+llada_generation: {temperature: 0.0, cfg_scale: 0.0, remasking: low_confidence, eot_token_id: 126348}
+autoregressive_task_generation:
+  open_ended: {max_new_tokens: 128}
+  mmlu: {max_new_tokens: 64}
+  mmlu_pro: {max_new_tokens: 2048}
+  hellaswag: {max_new_tokens: 64}
+  arc_c: {max_new_tokens: 64}
+  gsm8k: {max_new_tokens: 256}
+  math: {max_new_tokens: 256}
+  gpqa: {max_new_tokens: 128}
+  humaneval: {max_new_tokens: 256}
+  mbpp: {max_new_tokens: 128}

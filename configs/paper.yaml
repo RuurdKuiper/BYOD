@@ -1,0 +1,73 @@
+# Paper recipe, including the author-confirmed 0.9/0.1 loss weighting.
+# The historical Llama reference predates this weighting; see REPRODUCIBILITY.md.
+# Model identifiers and tokenizer details are selected from configs/models.yaml.
+dataset_name: Ruurd/LAD-training-1m-256
+dataset_revision: 6041513b684d6ca627879ffdb547b8629bb8b8de
+splits: {train: train, validation: validation, test: test}
+
+cache_dir: data/huggingface
+prepared_data_cache_dir: data/prepared
+base_model_cache_dir: base_models
+validation_samples: 200
+
+corruption_mode: mask_only
+structured_loss_behavior: corrupted_answer_tokens
+eos_padding_loss: true
+answer_padding_loss: {enabled: true, answer_weight: 0.9, padding_weight: 0.1}
+include_answer_eos: true
+t_min: 0.001
+# The original run predates frontier masking and therefore used IID masking.
+frontier_masking_probability: 0.0
+frontier_padding_mode: iid
+
+seed: 42
+multi_turn_prob: 0.0
+max_history_turns: 2
+
+lora_r: 1024
+lora_alpha: 1024
+lora_dropout: 0.0
+lora_targets: [q_proj, v_proj]
+train_normalization_layers: false
+
+learning_rate: 1.0e-5
+learning_rate_scaling: {enabled: false, mode: sqrt, reference_batch_size: 8}
+scheduler: cosine
+warmup_steps: 100
+weight_decay: 0.01
+max_grad_norm: 0.5
+
+epochs: 1
+max_updates: 25000
+max_sequence_length: 256
+batch_size: 16
+eval_batch_size: 8
+gradient_accumulation_steps: 1
+gradient_checkpointing: false
+selected_logit_optimization: true
+num_workers: 4
+prefetch_factor: 4
+
+logging_steps: 100
+validation_steps: 250
+checkpoint_steps: 1000
+checkpoint_mode: every_model
+
+generation_perplexity:
+  enabled: true
+  interval_steps: 1000
+  num_prompts: 20
+  num_steps: 32
+  max_new_tokens: 64
+  noise_level: 1.0
+  temperature: 0.5
+  top_k: 3
+  permanent_unmask: true
+  confidence_guided: true
+  proportional_unmask: false
+  seed: 1234
+
+precision: bf16
+fp8: {enabled: true, backend: transformer_engine, format: HYBRID}
+quantization: none
+optimizer: adamw
