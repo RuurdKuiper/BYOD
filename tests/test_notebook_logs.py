@@ -48,9 +48,11 @@ def test_messages_stream_and_metric_events_update_before_process_exits(tmp_path,
 import json, os, time
 from pathlib import Path
 assert os.environ["BYOD_NOTEBOOK"] == "1"
+assert os.environ["USE_TF"] == "0"
+assert os.environ["USE_TORCH"] == "1"
 Path({str(run)!r}).mkdir()
 print("Loading model", flush=True)
-print("training: 0%| | 0/2", end="\\r", flush=True)
+print("\\rtraining: 0%| | 0/2", end="", flush=True)
 print('__BYOD_METRIC__' + json.dumps(dict(split="train", step=1, weighted_loss=2.0)), flush=True)
 deadline = time.monotonic() + 5
 while not Path({str(acknowledgment)!r}).exists():
@@ -64,7 +66,8 @@ print("Validation complete", flush=True)
     assert [r["step"] for r in records] == [1, 2]
     output = capsys.readouterr().out
     assert "Loading model" in output and "Validation complete" in output
-    assert "__BYOD_METRIC__" not in output and "training: 0%" not in output
+    assert "__BYOD_METRIC__" not in output
+    assert "training: 0%" in output  # Native progress remains visible without widgets.
     assert "Loading model" in (run / "colab_training.log").read_text()
     assert statuses[-1] == "Finished: 2 updates"
 

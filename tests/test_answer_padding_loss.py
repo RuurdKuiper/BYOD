@@ -128,6 +128,7 @@ def test_tiny_training_saves_answer_padding_components(tmp_path, monkeypatch, se
 
     for name in ("LAD_STORAGE", "LAD_OUTPUT_ROOT"):
         monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("ACCELERATE_USE_CPU", "true")
     tokenizer = ToyTokenizer()
     tokenizer.pad_token_id = tokenizer.eos_token_id
     dataset = Dataset.from_list([

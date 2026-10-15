@@ -46,6 +46,17 @@ def _save_adapter(model, tokenizer, path: Path, initial_norms: dict[str, torch.T
     tokenizer.save_pretrained(path)
 
 
+def _worker_count(requested: int) -> int:
+    """Respect the CPUs assigned to this runtime, including Colab affinity limits."""
+    if requested < 0:
+        raise ValueError("num_workers must be non-negative")
+    try:
+        available = len(os.sched_getaffinity(0))
+    except (AttributeError, OSError, NotImplementedError):
+        available = os.cpu_count() or 1
+    return min(requested, max(1, available))
+
+
 def _loader(dataset, collator, batch_size, shuffle, seed, workers, prefetch_factor=4):
     """Build a reproducibly shuffled DataLoader using the supplied collator."""
     generator = torch.Generator().manual_seed(seed)
@@ -471,6 +482,7 @@ def run_training(config: dict[str, Any]) -> dict[str, Any]:
         # original run before constructing the new dataloader; the dataloader
         # may reshuffle the remaining examples freely without reusing them.
         train_data = train_data.select(range(already_seen_examples, len(train_data)))
+    config["num_workers"] = _worker_count(int(config.get("num_workers", 0)))
     prefetch_factor = int(config.get("prefetch_factor", 4))
     train_loader = _loader(train_data.shuffle(seed=seed), train_collator, int(config["batch_size"]), True, seed, int(config.get("num_workers", 0)), prefetch_factor)
     val_loader = _loader(val_data, eval_collator, int(config.get("eval_batch_size", config["batch_size"])), False, seed, int(config.get("num_workers", 0)), prefetch_factor)

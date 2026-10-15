@@ -259,3 +259,19 @@ def test_final_evaluation_profile_uses_the_full_suite_and_same_sampler_for_basel
         assert actual["max_new_tokens"] == actual["block_length"] == 128
         assert actual["num_steps"] == 64
         assert actual["sampler"] == "llada_official"
+
+
+@pytest.mark.parametrize("requested,expected", [(0, 0), (1, 1), (4, 2)])
+def test_worker_count_respects_runtime_cpu_affinity(monkeypatch, requested, expected):
+    from diffusion_lm import training
+    monkeypatch.setattr(training.os, "sched_getaffinity", lambda pid: {0, 1}, raising=False)
+    assert training._worker_count(requested) == expected
+
+
+def test_worker_count_without_affinity_uses_cpu_count(monkeypatch):
+    from diffusion_lm import training
+    monkeypatch.delattr(training.os, "sched_getaffinity", raising=False)
+    monkeypatch.setattr(training.os, "cpu_count", lambda: 1)
+    assert training._worker_count(4) == 1
+    with pytest.raises(ValueError, match="num_workers"):
+        training._worker_count(-1)

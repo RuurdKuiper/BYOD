@@ -90,7 +90,6 @@ class _TrainingDisplay:
 def run_with_dashboard(command: Sequence[str], run_dir: str | Path, max_updates: int) -> None:
     """Stream all logs and refresh the plot when the trainer emits a metric."""
     import os
-    import re
 
     run_dir = Path(run_dir)
     run_dir.parent.mkdir(parents=True, exist_ok=True)
@@ -98,25 +97,25 @@ def run_with_dashboard(command: Sequence[str], run_dir: str | Path, max_updates:
         raise FileExistsError(f"Choose a new run directory; this one already exists: {run_dir}")
     log_path = run_dir.parent / f".{run_dir.name}.training.log"
     view = _TrainingDisplay(max_updates)
-    environment = dict(os.environ, BYOD_NOTEBOOK="1", PYTHONUNBUFFERED="1")
+    environment = dict(os.environ, BYOD_NOTEBOOK="1", PYTHONUNBUFFERED="1", USE_TF="0", USE_TORCH="1")
     with log_path.open("w") as log:
         process = subprocess.Popen(
             list(command), stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
             text=True, errors="replace", bufsize=1, env=environment,
         )
+        # Keep tqdm carriage returns so the notebook can replace the same line.
+        process.stdout.reconfigure(newline="")
         try:
             for line in process.stdout:
                 log.write(line)
                 log.flush()
-                text = line.strip()
-                if text.startswith("__BYOD_METRIC__"):
-                    view.record(json.loads(text[len("__BYOD_METRIC__"):]))
-                elif re.search(r"\d+%.*\|", text):
-                    # tqdm carriage-return updates share one display, never the log history.
-                    if not text.startswith("training:"):
-                        view.status(text)
-                elif text:
-                    print(line, end="", flush=True)
+                message, marker, payload = line.partition("__BYOD_METRIC__")
+                # tqdm does not end its progress line with a newline. A metric
+                # event may therefore share that line; never discard it as a bar.
+                if message:
+                    print(message, end="", flush=True)
+                if marker:
+                    view.record(json.loads(payload))
             process.wait()
         except BaseException:
             if process.poll() is None:

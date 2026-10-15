@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 from copy import deepcopy
 from pathlib import Path
 
@@ -103,6 +104,9 @@ def main() -> None:
     if args.print_config:
         print(yaml.safe_dump(config, sort_keys=False), flush=True)
         return
+    # This trainer uses PyTorch; avoid importing Colab's unrelated TensorFlow install.
+    os.environ["USE_TF"] = "0"
+    os.environ["USE_TORCH"] = "1"
     from diffusion_lm.training import run_training
 
     run_training(config)

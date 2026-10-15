@@ -31,7 +31,7 @@ colab = [
   "ipywidgets>=8",
 ]
 cuda = ["bitsandbytes>=0.45"]
-test = ["pytest>=8"]
+test = ["pytest>=8", "ipython>=8"]
 evaluation = ["math-verify[antlr4_13_2]>=0.8", "openai>=1.68"]
 
 [project.urls]
