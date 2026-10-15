@@ -18,6 +18,8 @@ def load_training_config(
     *,
     output_dir: str | None = None,
     max_updates: int | None = None,
+    prepared_data_cache_dir: str | None = None,
+    prepared_data_persistent_cache_dir: str | None = None,
 ) -> dict:
     """Resolve the paper recipe or its smaller-model, rank-128 variant."""
     config = yaml.safe_load((ROOT / "configs" / "paper.yaml").read_text())
@@ -59,6 +61,10 @@ def load_training_config(
             raise ValueError("max_updates must be positive")
         config["max_updates"] = int(max_updates)
     config["output_dir"] = output_dir or f"outputs/{output_name}"
+    if prepared_data_cache_dir is not None:
+        config["prepared_data_cache_dir"] = prepared_data_cache_dir
+    if prepared_data_persistent_cache_dir is not None:
+        config["prepared_data_persistent_cache_dir"] = prepared_data_persistent_cache_dir
     return config
 
 
@@ -69,6 +75,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output-dir")
     parser.add_argument("--max-updates", type=int, help="Optional run-length override")
     parser.add_argument("--print-config", action="store_true")
+    parser.add_argument("--prepared-data-cache-dir", help="Local tokenized-data cache")
+    parser.add_argument("--prepared-data-persistent-cache-dir", help="Persistent backup restored into the local tokenized cache")
     return parser.parse_args()
 
 
@@ -80,6 +88,8 @@ def main() -> None:
         args.mode,
         output_dir=args.output_dir,
         max_updates=args.max_updates,
+        prepared_data_cache_dir=args.prepared_data_cache_dir,
+        prepared_data_persistent_cache_dir=args.prepared_data_persistent_cache_dir,
     )
     print(
         f"Training {config['display_name']} in {args.mode!r} mode for "

@@ -41,6 +41,7 @@ def test_quick_mode_preserves_the_full_recipe_except_model_rank_and_precision(mo
         "display_name", "fp8", "lora_alpha", "lora_r", "model_name_or_path",
         "model_revision", "output_dir", "precision", "run_mode",
         "tokenizer_name_or_path",
+        "prepared_dataset_config",
     }
     assert {
         key for key in paper | quick if paper.get(key) != quick.get(key)
@@ -152,3 +153,22 @@ def test_print_config_exits_without_starting_training(monkeypatch, capsys):
     output = capsys.readouterr().out
     assert "answer_weight: 0.9" in output
     assert "padding_weight: 0.1" in output
+
+
+def test_training_cli_forwards_cache_options(monkeypatch):
+    import sys
+    from types import SimpleNamespace
+    import train
+
+    configs = []
+    monkeypatch.setitem(sys.modules, "diffusion_lm.training", SimpleNamespace(run_training=configs.append))
+    monkeypatch.setattr(sys, "argv", [
+        "train.py", "--model", "llama", "--mode", "quick",
+        "--prepared-data-cache-dir", "/tmp/local-prepared",
+        "--prepared-data-persistent-cache-dir", "/tmp/persistent-prepared",
+    ])
+    train.main()
+    config = configs[0]
+    assert config["prepared_data_cache_dir"] == "/tmp/local-prepared"
+    assert config["prepared_data_persistent_cache_dir"] == "/tmp/persistent-prepared"
+    assert config["num_workers"] == 4

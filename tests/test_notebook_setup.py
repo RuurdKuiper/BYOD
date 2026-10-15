@@ -50,7 +50,12 @@ def test_default_setup_imports_checkout_in_live_kernel_without_optional_cuda_bui
         'Path("/content/BYOD")', f"Path({str(checkout)!r})",
     )
     namespace = {}
-    exec(compile(source, "notebook-setup", "exec"), namespace)
+    try:
+        exec(compile(source, "notebook-setup", "exec"), namespace)
+    finally:
+        # The simulated checkout must not remain importable by later tests.
+        # monkeypatch restores any real package removed before this cell ran.
+        sys.modules.pop("diffusion_lm", None)
 
     assert Path(namespace["diffusion_lm"].__file__) == package / "__init__.py"
     installs = [command for command in commands if "install" in command]
@@ -143,7 +148,11 @@ def test_training_cleans_non_fp8_environment_even_if_optional_cell_was_skipped(
     events = []
     monkeypatch.setattr(importlib, "reload", lambda module: events.append("reload") or module)
     monkeypatch.setattr(notebook_helpers, "remove_unused_transformer_engine", lambda: events.append("cleanup"))
-    monkeypatch.setattr(notebook_helpers, "run_with_dashboard", lambda *args, **kwargs: events.append("train"))
+    commands = []
+    def run(command, *args, **kwargs):
+        commands.append(command)
+        events.append("train")
+    monkeypatch.setattr(notebook_helpers, "run_with_dashboard", run)
     cuda = SimpleNamespace(
         is_available=lambda: True,
         get_device_name=lambda index: "Test GPU",
@@ -165,4 +174,6 @@ def test_training_cleans_non_fp8_environment_even_if_optional_cell_was_skipped(
         "save_to_drive": SimpleNamespace(value=False),
     }
     exec(compile(code_cell("run_with_dashboard"), "notebook-training", "exec"), namespace)
-    assert events == (["reload", "cleanup", "train"] if needs_cleanup else ["reload", "train"])
+    assert events == (["reload", "cleanup", "reload", "train"] if needs_cleanup else ["reload", "reload", "train"])
+    command = commands[0]
+    assert command[command.index("--prepared-data-cache-dir") + 1] == "/content/BYOD-cache/prepared"

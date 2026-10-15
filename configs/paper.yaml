@@ -3,6 +3,8 @@
 # Model identifiers and tokenizer details are selected from configs/models.yaml.
 dataset_name: Ruurd/LAD-training-1m-256
 dataset_revision: 6041513b684d6ca627879ffdb547b8629bb8b8de
+prepared_dataset_name: Ruurd/BYOD-tokenized-256
+prepared_dataset_revision: 2c9d2d97e2b45302cd3f3267fd1c232ff9e9b1a3
 splits: {train: train, validation: validation, test: test}
 
 cache_dir: data/huggingface

@@ -134,9 +134,13 @@ def test_tiny_training_saves_answer_padding_components(tmp_path, monkeypatch, se
         {"instruction": "Answer", "input": "", "output": "abcd" * (i % 3 + 1)}
         for i in range(8)
     ])
-    monkeypatch.setattr("datasets.load_dataset", lambda *args, **kwargs: DatasetDict(
-        train=dataset, validation=dataset.select(range(4)), test=dataset.select(range(4)),
-    ))
+    from diffusion_lm.data import prepare_mask_only_cache_record
+    prepared = dataset.map(lambda row, index: prepare_mask_only_cache_record(
+        {**row, "_index": index}, tokenizer, 32), with_indices=True,
+        remove_columns=dataset.column_names)
+    monkeypatch.setattr("diffusion_lm.prepared_cache.load_published_prepared_data",
+                        lambda *args: DatasetDict(
+                            train=prepared, validation=prepared.select(range(4)), test=prepared.select(range(4))))
     monkeypatch.setattr(training.AutoTokenizer, "from_pretrained", lambda *args, **kwargs: tokenizer)
     model = get_peft_model(LlamaForCausalLM(LlamaConfig(
         vocab_size=16, hidden_size=16, intermediate_size=32, num_hidden_layers=1,
@@ -153,7 +157,7 @@ def test_tiny_training_saves_answer_padding_components(tmp_path, monkeypatch, se
         "precision": "fp32", "batch_size": 2, "eval_batch_size": 3,
         "max_updates": 2, "gradient_accumulation_steps": 2, "max_sequence_length": 32,
         "pad_to_multiple_of": 8, "learning_rate": .01, "scheduler": "constant",
-        "logging_steps": 1, "validation_steps": 1, "num_workers": 0, "preprocessing_num_workers": 1,
+        "logging_steps": 1, "validation_steps": 1, "num_workers": 0,
         "frontier_masking_probability": .75, "t_min": .2,
         "selected_logit_optimization": selected_logits,
     }

@@ -2,7 +2,6 @@
 from __future__ import annotations
 import json
 import atexit
-import hashlib
 import importlib.util
 import math
 import os
@@ -17,7 +16,7 @@ from torch.optim import AdamW
 from torch.utils.data import DataLoader
 from transformers import AutoTokenizer, get_polynomial_decay_schedule_with_warmup, get_scheduler
 
-from .data import DenoisingCollator, llama_stored_ids_compatible, prepare_mask_only_cache_record, stored_example_usable
+from .data import DenoisingCollator
 from .loss import masked_denoising_loss, selected_denoising_loss
 from .modeling import forward_bidirectional, forward_bidirectional_selected, load_denoising_model, parameter_audit
 from .inference import InferenceSession, _native_eot_token_id, llada_generate
@@ -405,6 +404,47 @@ def evaluate(model, loader, accelerator, mode: str, all_tokens: bool = False, eo
     return d
 
 
+def load_training_data(config: dict[str, Any], train_sample_limit: int | None, accelerator=None):
+    """Download matching clean tokens once and reuse the local/Drive cache."""
+    from contextlib import nullcontext
+    from datasets import load_from_disk
+    from .prepared_cache import (
+        preparation_metadata, preparation_key, load_published_prepared_data,
+        restore_prepared_cache, persist_prepared_cache,
+    )
+
+    tokenizer = AutoTokenizer.from_pretrained(
+        config.get("tokenizer_name_or_path", config["model_name_or_path"]),
+        revision=config.get("model_revision"), use_fast=True,
+        token=os.getenv("HF_TOKEN"), cache_dir=config.get("base_model_cache_dir", "base_models"),
+        clean_up_tokenization_spaces=False,
+    )
+    if tokenizer.pad_token_id is None:
+        tokenizer.pad_token = tokenizer.eos_token
+    torch.manual_seed(int(config.get("seed", 42)))
+    key = preparation_key(preparation_metadata(config, tokenizer, train_sample_limit))
+    local = Path(config.get("prepared_data_cache_dir", "data/prepared")) / key
+    persistent_dir = config.get("prepared_data_persistent_cache_dir")
+    persistent = Path(persistent_dir) / key if persistent_dir else None
+    main_process_first = accelerator.main_process_first if accelerator is not None else nullcontext
+    with main_process_first():
+        if restore_prepared_cache(local, persistent):
+            print(f"Reusing tokenized data: {local}", flush=True)
+            data = {split: load_from_disk(str(local / split)) for split in ("train", "validation", "test")}
+        else:
+            data = load_published_prepared_data(config, tokenizer, train_sample_limit)
+            if data is None:
+                raise ValueError(
+                    "No compatible published token profile for this recipe. "
+                    "Use a shipped preset within its 400,000-example training budget, "
+                    "or configure a matching published dataset and revision."
+                )
+            for split, dataset in data.items():
+                dataset.save_to_disk(str(local / split))
+        persist_prepared_cache(local, persistent)
+    return tokenizer, data["train"], data["validation"], data["test"]
+
+
 def run_training(config: dict[str, Any]) -> dict[str, Any]:
     """Execute model setup, training, validation, selection, and final testing."""
     answer_padding_weights = _resolve_answer_padding_weights(config)
@@ -500,134 +540,10 @@ def run_training(config: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("checkpoint_mode must be 'only_best_model', 'every_model', or 'every_checkpoint'")
     generation_settings = config.get("generation_perplexity", {})
     generation_interval = _generation_perplexity_interval(config) if generation_settings.get("enabled", False) else None
-    from datasets import load_dataset
-    cache_dir = Path(config.get("cache_dir", "data/huggingface")); cache_dir.mkdir(parents=True, exist_ok=True)
-    hf_token = os.getenv("HF_TOKEN")
-    # Serialize the initial dataset download/cache population so distributed
-    # workers do not all perform the expensive preparation concurrently.
-    with accelerator.main_process_first():
-        raw = load_dataset(
-            config["dataset_name"],
-            config.get("dataset_config"),
-            revision=config.get("dataset_revision"),
-            cache_dir=str(cache_dir),
-            token=hf_token,
-        )
-    split_names = config.get("splits", {"train": "train", "validation": "validation", "test": "test"})
-    token_name = config.get("tokenizer_name_or_path", config["model_name_or_path"])
-    model_cache = Path(config.get("base_model_cache_dir", "base_models")); model_cache.mkdir(parents=True, exist_ok=True)
-    tokenizer = AutoTokenizer.from_pretrained(
-        token_name,
-        revision=config.get("model_revision"),
-        use_fast=True,
-        token=os.getenv("HF_TOKEN"),
-        cache_dir=str(model_cache),
-        clean_up_tokenization_spaces=False,
+    tokenizer, train_data, val_data, test_data = load_training_data(
+        config, train_sample_limit, accelerator,
     )
-    if tokenizer.pad_token_id is None: tokenizer.pad_token = tokenizer.eos_token
-    seed = int(config.get("seed", 42)); torch.manual_seed(seed)
-    def indexed(ds):
-        """Attach stable original indices for deterministic evaluation corruption."""
-        return ds.map(lambda _, index: {"_index": index}, with_indices=True)
-    def get_split(spec):
-        """Resolve either a named split or a Hugging Face split expression."""
-        if spec in raw:
-            return raw[spec]
-        # Hugging Face split expressions (e.g. train[:8]) are valid smoke-test inputs.
-        return load_dataset(
-            config["dataset_name"],
-            config.get("dataset_config"),
-            revision=config.get("dataset_revision"),
-            split=spec,
-            cache_dir=str(cache_dir),
-            token=hf_token,
-        )
-    def bounded_filter(dataset, predicate, limit: int | None):
-        """Filter only as many source rows as needed for a capped run."""
-        if limit is None or len(dataset) <= limit:
-            return dataset.filter(predicate)
-        from datasets import concatenate_datasets
-        chunks = []
-        kept = 0
-        chunk_size = 2048
-        for start in range(0, len(dataset), chunk_size):
-            chunk = dataset.select(range(start, min(start + chunk_size, len(dataset))))
-            filtered = chunk.filter(predicate)
-            if len(filtered):
-                chunks.append(filtered)
-                kept += len(filtered)
-            if kept >= limit:
-                break
-        if not chunks:
-            return dataset.select([])
-        result = concatenate_datasets(chunks)
-        return result.select(range(min(limit, len(result))))
-
-    prep_key = hashlib.sha256(json.dumps({"format": 2, "dataset": config["dataset_name"], "dataset_revision": config.get("dataset_revision"), "config": config.get("dataset_config"), "splits": split_names, "tokenizer": token_name, "model_revision": config.get("model_revision"), "chat_template": getattr(tokenizer, "chat_template", None), "mode": config["corruption_mode"], "max_length": int(config["max_sequence_length"]), "include_answer_eos": bool(config.get("include_answer_eos", True)), "train_sample_limit": train_sample_limit, "seed": seed}, sort_keys=True).encode()).hexdigest()[:16]
-    prep_root = Path(config.get("prepared_data_cache_dir", "data/prepared")) / prep_key
-    prepared_cache_loaded = False
-    with accelerator.main_process_first():
-        if all((prep_root / split).is_dir() for split in ("train", "validation", "test")):
-            from datasets import load_from_disk
-            train_data, val_data, test_data = (load_from_disk(str(prep_root / split)) for split in ("train", "validation", "test"))
-            prepared_cache_loaded = True
-        else:
-            train_data, val_data, test_data = (indexed(get_split(split_names[k])) for k in ("train", "validation", "test"))
-    if config["corruption_mode"] == "structured" and prepared_cache_loaded and train_sample_limit is not None and len(train_data) > train_sample_limit:
-        train_data = train_data.shuffle(seed=int(config.get("seed", 42))).select(range(train_sample_limit))
-    if config["corruption_mode"] != "structured" and not prepared_cache_loaded:
-        # The published dataset contains a small number of rows with missing
-        # or empty outputs. Remove them before collation, otherwise a worker
-        # would fail mid-epoch instead of skipping malformed examples.
-        has_output = lambda row: bool((row.get("output") or "").strip())
-        train_data = bounded_filter(train_data.shuffle(seed=int(config.get("seed", 42))), has_output, train_sample_limit)
-        val_data = val_data.filter(has_output)
-        test_data = test_data.filter(has_output)
-        preprocessing_workers = int(config.get("preprocessing_num_workers", config.get("num_workers", 1)))
-        if preprocessing_workers < 1:
-            raise ValueError("preprocessing_num_workers must be positive")
-        with accelerator.main_process_first():
-            for key, dataset in (("train", train_data), ("validation", val_data), ("test", test_data)):
-                original_columns = dataset.column_names
-                dataset = dataset.map(
-                    lambda row: prepare_mask_only_cache_record(
-                        row,
-                        tokenizer,
-                        int(config["max_sequence_length"]),
-                        bool(config.get("include_answer_eos", True)),
-                    ),
-                    remove_columns=original_columns,
-                    num_proc=preprocessing_workers if preprocessing_workers > 1 else None,
-                    desc=f"Tokenizing {key} split",
-                )
-                if key == "train": train_data = dataset
-                elif key == "validation": val_data = dataset
-                else: test_data = dataset
-            prep_root.mkdir(parents=True, exist_ok=True)
-            train_data.save_to_disk(str(prep_root / "train"))
-            val_data.save_to_disk(str(prep_root / "validation"))
-            test_data.save_to_disk(str(prep_root / "test"))
-    marker_dropped = {}
-    if config["corruption_mode"] == "structured" and not prepared_cache_loaded:
-        model_name = token_name.lower()
-        if not any(name in model_name for name in ("llama", "meta-llama")):
-            raise ValueError("structured mode is supported only for Llama-tokenized data; use mask_only for Qwen/Gemma")
-        marker_dropped = {}
-        with accelerator.main_process_first():
-            if train_sample_limit is not None and len(train_data) > train_sample_limit:
-                train_data = train_data.shuffle(seed=int(config.get("seed", 42)))
-            for key, dataset in (("train", train_data), ("validation", val_data), ("test", test_data)):
-                before = len(dataset)
-                limit = train_sample_limit if key == "train" else None
-                dataset = bounded_filter(dataset, lambda row: llama_stored_ids_compatible(row, tokenizer) and stored_example_usable(row, tokenizer, int(config["max_sequence_length"]), bool(config.get("include_answer_eos", True))), limit)
-                marker_dropped[key] = before - len(dataset)
-                if key == "train": train_data = dataset
-                elif key == "validation": val_data = dataset
-                else: test_data = dataset
-            prep_root.mkdir(parents=True, exist_ok=True)
-            train_data.save_to_disk(str(prep_root / "train"))
-            val_data.save_to_disk(str(prep_root / "validation"))
-            test_data.save_to_disk(str(prep_root / "test"))
+    seed = int(config.get("seed", 42))
     validation_limit = config.get("validation_samples", 200)
     if validation_limit is not None:
         validation_limit = min(int(validation_limit), len(val_data))
@@ -661,7 +577,7 @@ def run_training(config: dict[str, Any]) -> dict[str, Any]:
     model, audit = load_denoising_model(config)
     initial_norms = _normalization_state(model)
     resolved_learning_rate, effective_batch_size, learning_rate_scale = _resolve_learning_rate(config, accelerator.num_processes)
-    resolved = dict(config); resolved["eos_padding_loss"] = train_collator.eos_padding_loss; resolved["frontier_padding_mode"] = train_collator.frontier_padding_mode; resolved["training_samples_used"] = len(train_data); resolved["training_sample_limit"] = train_sample_limit; resolved["validation_samples_used"] = len(val_data); resolved["structured_marker_dropped"] = marker_dropped if config["corruption_mode"] == "structured" else {}; resolved["effective_batch_size"] = effective_batch_size; resolved["learning_rate_scale"] = learning_rate_scale; resolved["resolved_learning_rate"] = resolved_learning_rate; resolved["fp8_requested"] = fp8_resolution["requested"]; resolved["fp8_active"] = fp8_resolution["active"]; resolved["fp8_device_name"] = fp8_resolution["device_name"]; resolved["fp8_compute_capability"] = fp8_resolution["capability"]; resolved["resolved_training_precision"] = fp8_resolution["mixed_precision"] or "fp32"
+    resolved = dict(config); resolved["eos_padding_loss"] = train_collator.eos_padding_loss; resolved["frontier_padding_mode"] = train_collator.frontier_padding_mode; resolved["training_samples_used"] = len(train_data); resolved["training_sample_limit"] = train_sample_limit; resolved["validation_samples_used"] = len(val_data); resolved["effective_batch_size"] = effective_batch_size; resolved["learning_rate_scale"] = learning_rate_scale; resolved["resolved_learning_rate"] = resolved_learning_rate; resolved["fp8_requested"] = fp8_resolution["requested"]; resolved["fp8_active"] = fp8_resolution["active"]; resolved["fp8_device_name"] = fp8_resolution["device_name"]; resolved["fp8_compute_capability"] = fp8_resolution["capability"]; resolved["resolved_training_precision"] = fp8_resolution["mixed_precision"] or "fp32"
     _write_json(output / "resolved_config.json", resolved); _write_json(output / "parameter_audit.json", audit); _write_json(output / "mask_token.json", train_collator.mask_info)
     trainable_parameter_names = {name for name, parameter in model.named_parameters() if parameter.requires_grad}
     trainable_parameters = [p for p in model.parameters() if p.requires_grad]

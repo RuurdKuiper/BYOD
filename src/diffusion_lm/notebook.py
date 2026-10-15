@@ -57,6 +57,14 @@ def _tail(path: Path, lines: int = 12) -> str:
     return "\n".join(path.read_text(errors="replace").splitlines()[-lines:])
 
 
+def training_error_excerpt(text: str, limit: int = 16000) -> str:
+    """Preserve the first traceback when shutdown noise fills the log tail."""
+    start = text.find("Traceback (most recent call last)")
+    if start >= 0:
+        return text[max(0, start - 500):start + limit]
+    return text[-limit:]
+
+
 def _show(run_dir: Path, log_path: Path, max_updates: int, started: float) -> None:
     from IPython.display import clear_output, display
     import matplotlib.pyplot as plt
@@ -131,8 +139,10 @@ def run_with_dashboard(
             process.wait(timeout=30)
             raise
     _show(run_dir, log_path, max_updates, started)
-    if process.returncode:
-        raise subprocess.CalledProcessError(process.returncode, command)
     if run_dir.is_dir():
-        log_path.replace(run_dir / "colab_training.log")
+        log_path = log_path.replace(run_dir / "colab_training.log")
+    if process.returncode:
+        error = training_error_excerpt(log_path.read_text(errors="replace"))
+        print(f"\nTraining failed. Full log: {log_path}\n\n{error}", flush=True)
+        raise subprocess.CalledProcessError(process.returncode, command, output=error)
     print(f"\nFinished. Artifacts are in {run_dir}")
