@@ -2,7 +2,6 @@
 from __future__ import annotations
 import json
 import atexit
-import importlib.util
 import math
 import os
 from pathlib import Path
@@ -33,6 +32,8 @@ def _append_jsonl(path: Path, value: Any) -> None:
     """Append one metrics record to a JSON Lines file."""
     with path.open("a") as f:
         f.write(json.dumps(value, default=float) + "\n")
+    if path.name == "metrics.jsonl" and os.getenv("BYOD_NOTEBOOK") == "1":
+        print("__BYOD_METRIC__" + json.dumps(value, default=float), flush=True)
 
 
 def _save_adapter(model, tokenizer, path: Path, initial_norms: dict[str, torch.Tensor] | None = None) -> None:
@@ -196,79 +197,6 @@ def _build_learning_rate_scheduler(
         lr_end=end_learning_rate,
         power=1.0,
     )
-
-
-def _native_fp8_capability(capability: tuple[int, int]) -> bool:
-    """Return whether NVIDIA Transformer Engine supports native FP8 on this GPU."""
-    major, minor = capability
-    return (major, minor) == (8, 9) or major >= 9
-
-
-def _resolve_fp8(
-    config: dict[str, Any],
-    *,
-    cuda_available: bool | None = None,
-    capability: tuple[int, int] | None = None,
-    device_name: str | None = None,
-    transformer_engine_available: bool | None = None,
-) -> dict[str, Any]:
-    """Resolve hardware-gated Transformer Engine FP8 or a BF16 fallback."""
-    settings = config.get("fp8", {}) or {}
-    if not isinstance(settings, dict):
-        raise ValueError("fp8 must be a mapping")
-    enabled = settings.get("enabled", False)
-    if not isinstance(enabled, bool):
-        raise ValueError("fp8.enabled must be true or false")
-    base_precision = str(config.get("precision", "bf16")).lower()
-    if not enabled:
-        return {
-            "requested": False,
-            "active": False,
-            "model_precision": base_precision,
-            "mixed_precision": None if base_precision == "fp32" else base_precision,
-            "device_name": None,
-            "capability": None,
-            "notice": None,
-        }
-
-    backend = str(settings.get("backend", "transformer_engine")).lower()
-    if backend not in {"transformer_engine", "te"}:
-        raise ValueError("fp8.backend must be 'transformer_engine'")
-    cuda_available = torch.cuda.is_available() if cuda_available is None else cuda_available
-    if cuda_available:
-        capability = torch.cuda.get_device_capability() if capability is None else capability
-        device_name = torch.cuda.get_device_name() if device_name is None else device_name
-    supported = bool(cuda_available and capability is not None and _native_fp8_capability(capability))
-    if not supported:
-        description = "no CUDA GPU" if not cuda_available else f"{device_name or 'CUDA GPU'} (compute capability {capability[0]}.{capability[1]})"
-        return {
-            "requested": True,
-            "active": False,
-            "model_precision": "bf16",
-            "mixed_precision": "bf16",
-            "device_name": device_name,
-            "capability": capability,
-            "notice": f"FP8 requested, but {description} does not provide supported native FP8 training; falling back to BF16.",
-        }
-
-    if base_precision not in {"fp16", "bf16"}:
-        raise ValueError("FP8 training requires precision to be fp16 or bf16 for master weights")
-    if transformer_engine_available is None:
-        transformer_engine_available = importlib.util.find_spec("transformer_engine") is not None
-    if not transformer_engine_available:
-        raise ImportError(
-            "FP8-capable GPU detected, but NVIDIA Transformer Engine is not installed. "
-            "Install it with `pip install -e '.[fp8]'`."
-        )
-    return {
-        "requested": True,
-        "active": True,
-        "model_precision": base_precision,
-        "mixed_precision": "fp8",
-        "device_name": device_name,
-        "capability": capability,
-        "notice": None,
-    }
 
 
 def _available_output_dir(path: Path) -> Path:
@@ -492,40 +420,13 @@ def run_training(config: dict[str, Any]) -> dict[str, Any]:
         if configured_updates_hint < 1:
             raise ValueError("max_updates must be a positive number of gradient updates")
         train_sample_limit = (configured_updates_hint + resume_data_updates) * int(config.get("gradient_accumulation_steps", 1)) * int(config.get("batch_size", 1))
-    fp8_resolution = _resolve_fp8(config)
-    config["precision"] = fp8_resolution["model_precision"]
-    if fp8_resolution["notice"] and int(os.getenv("LOCAL_RANK", "0")) == 0:
-        print(f"WARNING: {fp8_resolution['notice']}", flush=True)
-    accelerator_handlers = []
-    if fp8_resolution["active"]:
-        from accelerate.utils import TERecipeKwargs
-
-        fp8_settings = config.get("fp8", {})
-        override_linear_precision = tuple(fp8_settings.get("override_linear_precision", (False, False, False)))
-        if len(override_linear_precision) != 3 or not all(isinstance(value, bool) for value in override_linear_precision):
-            raise ValueError("fp8.override_linear_precision must contain three booleans")
-        accelerator_handlers.append(TERecipeKwargs(
-            use_autocast_during_eval=False,
-            margin=int(fp8_settings.get("margin", 0)),
-            interval=int(fp8_settings.get("interval", 1)),
-            fp8_format=str(fp8_settings.get("format", "HYBRID")).upper(),
-            amax_history_len=int(fp8_settings.get("amax_history_len", 1024)),
-            amax_compute_algo=str(fp8_settings.get("amax_compute_algo", "max")).lower(),
-            override_linear_precision=override_linear_precision,
-        ))
-        if int(os.getenv("LOCAL_RANK", "0")) == 0:
-            capability = fp8_resolution["capability"]
-            print(
-                f"FP8 enabled with NVIDIA Transformer Engine on {fp8_resolution['device_name']} "
-                f"(compute capability {capability[0]}.{capability[1]}); "
-                f"validation remains {fp8_resolution['model_precision'].upper()}.",
-                flush=True,
-            )
+    precision = str(config.get("precision", "bf16")).lower()
+    if precision not in {"fp16", "bf16", "fp32"}:
+        raise ValueError("precision must be fp16, bf16, or fp32")
     accelerator = Accelerator(
         gradient_accumulation_steps=int(config.get("gradient_accumulation_steps", 1)),
-        mixed_precision=fp8_resolution["mixed_precision"],
+        mixed_precision="no" if precision == "fp32" else precision,
         dataloader_config=DataLoaderConfiguration(non_blocking=torch.cuda.is_available()),
-        kwargs_handlers=accelerator_handlers,
     )
     # Ensure NCCL process groups are released when a worker is interrupted
     # (for example with Ctrl-C or a scheduler pre-emption signal).
@@ -577,9 +478,8 @@ def run_training(config: dict[str, Any]) -> dict[str, Any]:
     model, audit = load_denoising_model(config)
     initial_norms = _normalization_state(model)
     resolved_learning_rate, effective_batch_size, learning_rate_scale = _resolve_learning_rate(config, accelerator.num_processes)
-    resolved = dict(config); resolved["eos_padding_loss"] = train_collator.eos_padding_loss; resolved["frontier_padding_mode"] = train_collator.frontier_padding_mode; resolved["training_samples_used"] = len(train_data); resolved["training_sample_limit"] = train_sample_limit; resolved["validation_samples_used"] = len(val_data); resolved["effective_batch_size"] = effective_batch_size; resolved["learning_rate_scale"] = learning_rate_scale; resolved["resolved_learning_rate"] = resolved_learning_rate; resolved["fp8_requested"] = fp8_resolution["requested"]; resolved["fp8_active"] = fp8_resolution["active"]; resolved["fp8_device_name"] = fp8_resolution["device_name"]; resolved["fp8_compute_capability"] = fp8_resolution["capability"]; resolved["resolved_training_precision"] = fp8_resolution["mixed_precision"] or "fp32"
+    resolved = dict(config); resolved["eos_padding_loss"] = train_collator.eos_padding_loss; resolved["frontier_padding_mode"] = train_collator.frontier_padding_mode; resolved["training_samples_used"] = len(train_data); resolved["training_sample_limit"] = train_sample_limit; resolved["validation_samples_used"] = len(val_data); resolved["effective_batch_size"] = effective_batch_size; resolved["learning_rate_scale"] = learning_rate_scale; resolved["resolved_learning_rate"] = resolved_learning_rate; resolved["resolved_training_precision"] = precision
     _write_json(output / "resolved_config.json", resolved); _write_json(output / "parameter_audit.json", audit); _write_json(output / "mask_token.json", train_collator.mask_info)
-    trainable_parameter_names = {name for name, parameter in model.named_parameters() if parameter.requires_grad}
     trainable_parameters = [p for p in model.parameters() if p.requires_grad]
     optimizer_name = str(config.get("optimizer", "adamw")).lower()
     if optimizer_name in {"adamw8bit", "8bit_adamw", "paged_adamw8bit"}:
@@ -617,22 +517,6 @@ def run_training(config: dict[str, Any]) -> dict[str, Any]:
     max_steps = max_updates * grad_accumulation
     scheduler = _build_learning_rate_scheduler(config, optimizer, max_updates, resolved_learning_rate)
     model, optimizer, train_loader, val_loader, test_loader, scheduler = accelerator.prepare(model, optimizer, train_loader, val_loader, test_loader, scheduler)
-    if fp8_resolution["active"]:
-        # Accelerate replaces nn.Linear modules with Transformer Engine modules.
-        # Restore the pre-conversion trainable set so frozen base weights do not
-        # unexpectedly receive gradients after replacement.
-        unwrapped = accelerator.unwrap_model(model)
-        for name, parameter in unwrapped.named_parameters():
-            parameter.requires_grad_(name in trainable_parameter_names)
-        converted_trainable_names = {name for name, parameter in unwrapped.named_parameters() if parameter.requires_grad}
-        if converted_trainable_names != trainable_parameter_names:
-            raise RuntimeError(
-                "Transformer Engine conversion changed parameter names; refusing to train with an incorrect trainable set."
-            )
-        post_fp8_audit = parameter_audit(unwrapped)
-        audit.update({key: value for key, value in post_fp8_audit.items() if key != "trainable_names"})
-        audit["fp8_transformer_engine"] = True
-        _write_json(output / "parameter_audit.json", audit)
     start_step = 0
     if resume := config.get("resume_from_checkpoint"):
         accelerator.load_state(resume)
@@ -662,7 +546,6 @@ def run_training(config: dict[str, Any]) -> dict[str, Any]:
                 sparse_positions
                 and accelerator.num_processes == 1
                 and bool(config.get("selected_logit_optimization", False))
-                and not fp8_resolution["active"]
             )
             if use_selected_logits:
                 # Calling the transformer backbone directly bypasses
@@ -722,12 +605,12 @@ def run_training(config: dict[str, Any]) -> dict[str, Any]:
             progress.update(1)
         if not accelerator.sync_gradients:
             continue
-        if accelerator.is_main_process and step % int(config.get("logging_steps", 10)) == 0:
+        if accelerator.is_main_process and update_step % int(config.get("logging_steps", 10)) == 0:
             loss_value = loss.detach().item()
             supervised_tokens = info["supervised_tokens"].item()
             train_avg = (interval_loss_sum / interval_examples.clamp_min(1)).item()
             progress.set_postfix(train_loss=f"{loss_value:.4f}", train_avg=f"{train_avg:.4f}")
-            _append_jsonl(metrics_path, {"split": "train", "step": step, "weighted_loss": loss_value,
+            _append_jsonl(metrics_path, {"split": "train", "step": update_step, "weighted_loss": loss_value,
                                         "supervised_tokens": supervised_tokens,
                                         **{name: info[name].item() for name in interval_component_sums}})
         if update_step % int(config.get("validation_steps", 100)) == 0 or update_step == max_updates:

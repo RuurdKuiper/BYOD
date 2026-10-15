@@ -20,6 +20,7 @@ def test_paper_presets_keep_the_original_recipe(model):
     assert config["answer_padding_loss"] == {
         "enabled": True, "answer_weight": 0.9, "padding_weight": 0.1,
     }
+    assert "fp8" not in config
     assert config["quantization"] == "none"
 
 
@@ -29,6 +30,7 @@ def test_quick_mode_is_explicitly_smaller():
     assert config["max_updates"] == 25_000
     assert config["lora_r"] == config["lora_alpha"] == 128
     assert config["model_name_or_path"] == "meta-llama/Llama-3.2-1B-Instruct"
+    assert "fp8" not in config
     assert config["quantization"] == "none"
     assert config["generation_perplexity"]["enabled"] is True
 
@@ -38,7 +40,7 @@ def test_quick_mode_preserves_the_full_recipe_except_model_rank_and_precision(mo
     paper = load_training_config(model, "paper")
     quick = load_training_config(model, "quick")
     allowed_differences = {
-        "display_name", "fp8", "lora_alpha", "lora_r", "model_name_or_path",
+        "display_name", "lora_alpha", "lora_r", "model_name_or_path",
         "model_revision", "output_dir", "precision", "run_mode",
         "tokenizer_name_or_path",
         "prepared_dataset_config",
@@ -83,7 +85,7 @@ def test_llama_paper_config_preserves_historical_settings_with_confirmed_loss():
     )
     config = load_training_config("llama")
     runtime_fields = {
-        "effective_batch_size", "fp8_active", "fp8_compute_capability",
+        "fp8", "effective_batch_size", "fp8_active", "fp8_compute_capability",
         "fp8_device_name", "fp8_requested", "learning_rate_scale",
         "resolved_learning_rate", "resolved_training_precision",
         "structured_marker_dropped", "training_sample_limit",
@@ -120,7 +122,7 @@ def test_public_notebook_exposes_every_paper_model_and_has_no_saved_outputs():
     )
     for model in ("llama", "gemma", "qwen", "ministral"):
         assert f'"{model}"' in source
-    assert "25,000-update recipe" in source
+    assert "25,000 updates" in source
     assert "Dovelove/byod-llama-3.1-8b" in source
     assert all(
         not cell.get("outputs") and cell.get("execution_count") is None

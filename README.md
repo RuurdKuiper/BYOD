@@ -33,12 +33,7 @@ Training requires an NVIDIA GPU. Use `--max-updates 2` for a short smoke run.
 Both modes default to 25,000 updates. Quick mode uses smaller models and
 rank-128 LoRA; paper mode uses rank-1024 LoRA and needs a high-memory GPU
 (the original runs used 96 GB). Quick mode does not reproduce the paper scores.
-For native FP8 paper training, install Transformer Engine first:
-
-```bash
-pip install --no-build-isolation 'transformer-engine[pytorch]==2.13.0'
-python train.py --model llama --mode paper
-```
+This version uses FP16/BF16 training without FP8.
 
 Training downloads the matching [pretokenized dataset](https://huggingface.co/datasets/Ruurd/BYOD-tokenized-256)
 automatically. Each profile covers the default 400,000-example training budget.

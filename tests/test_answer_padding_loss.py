@@ -166,6 +166,7 @@ def test_tiny_training_saves_answer_padding_components(tmp_path, monkeypatch, se
     records = [json.loads(line) for line in (output / "metrics.jsonl").read_text().splitlines()]
     assert {record["split"] for record in records} == {"train", "train_interval", "validation"}
     assert len([record for record in records if record["split"] == "train_interval"]) == 2
+    assert [record["step"] for record in records if record["split"] == "train"] == [1, 2]
     for record in [*records, json.loads((output / "test_metrics.json").read_text())]:
         assert record["weighted_loss"] == pytest.approx(.9 * record["answer_loss"] + .1 * record["padding_loss"], rel=1e-6)
     resolved = json.loads((output / "resolved_config.json").read_text())

@@ -12,13 +12,7 @@ from typing import Sequence
 
 
 def remove_unused_transformer_engine() -> list[str]:
-    """Remove optional FP8 packages before non-FP8 notebook training.
-
-    PEFT probes installed Transformer Engine during import, even for ordinary
-    LoRA. A stale CUDA build can therefore break quick-mode training. Only call
-    this for a run that does not need Transformer Engine; leave PyTorch and its
-    CUDA dependencies installed. Training starts in a fresh subprocess.
-    """
+    """Remove incompatible optional libraries that PEFT may import on Colab."""
     installed = []
     for name in (
         "transformer-engine", "transformer-engine-torch",
@@ -30,31 +24,12 @@ def remove_unused_transformer_engine() -> list[str]:
             continue
         installed.append(name)
     if installed:
-        print("Remove unused FP8 packages before training: " + ", ".join(installed), flush=True)
         subprocess.run(
             [sys.executable, "-m", "pip", "uninstall", "-y", *installed],
-            check=True,
+            check=True, stdout=subprocess.DEVNULL,
         )
         importlib.invalidate_caches()
     return installed
-
-
-def _records(path: Path) -> list[dict]:
-    if not path.is_file():
-        return []
-    records = []
-    for line in path.read_text().splitlines():
-        try:
-            records.append(json.loads(line))
-        except (json.JSONDecodeError, ValueError):
-            pass
-    return records
-
-
-def _tail(path: Path, lines: int = 12) -> str:
-    if not path.is_file():
-        return "Waiting for the training process to start…"
-    return "\n".join(path.read_text(errors="replace").splitlines()[-lines:])
 
 
 def training_error_excerpt(text: str, limit: int = 16000) -> str:
@@ -65,84 +40,96 @@ def training_error_excerpt(text: str, limit: int = 16000) -> str:
     return text[-limit:]
 
 
-def _show(run_dir: Path, log_path: Path, max_updates: int, started: float) -> None:
-    from IPython.display import clear_output, display
-    import matplotlib.pyplot as plt
+class _TrainingDisplay:
+    """Update only the status and plot; ordinary log messages stay visible."""
 
-    clear_output(wait=True)
-    records = _records(run_dir / "metrics.jsonl")
-    train = [r for r in records if r.get("split") == "train"]
-    validation = [r for r in records if r.get("split") == "validation"]
-    last_step = max([int(r.get("step", 0)) for r in records] or [0])
-    elapsed = (time.time() - started) / 60
-    print(f"Training: {last_step:,}/{max_updates:,} updates logged · elapsed {elapsed:.1f} min")
+    def __init__(self, max_updates: int):
+        from IPython.display import display
+        import ipywidgets as widgets
+        self.max_updates = max_updates
+        self.started = time.monotonic()
+        self.status_display = widgets.HTML("Preparing data and model…")
+        self.plot_display = widgets.Output()
+        display(self.status_display, self.plot_display)
+        self.train = []
+        self.validation = []
 
-    if train or validation:
-        figure, axis = plt.subplots(figsize=(9, 4))
-        if train:
-            axis.plot(
-                [r["step"] for r in train],
-                [r["weighted_loss"] for r in train],
-                alpha=.7,
-                linewidth=1.3,
-                label="training loss",
-            )
-        if validation:
-            axis.plot(
-                [r["step"] for r in validation],
-                [r["weighted_loss"] for r in validation],
-                marker="o",
-                linewidth=2,
-                label="validation loss",
-            )
-        axis.set(xlabel="update", ylabel="denoising loss", title="Live training progress")
+    def status(self, text: str) -> None:
+        from html import escape
+        self.status_display.value = "<pre>" + escape(text) + "</pre>"
+
+    def record(self, record: dict) -> None:
+        from IPython.display import display
+        import matplotlib.pyplot as plt
+        split = record.get("split")
+        if split not in {"train", "validation"}:
+            return
+        points = self.train if split == "train" else self.validation
+        points.append(record)
+        step = int(record["step"])
+        elapsed = (time.monotonic() - self.started) / 60
+        self.status(f"Training: {step:,}/{self.max_updates:,} updates · "
+                    f"{split} loss {record['weighted_loss']:.4f} · elapsed {elapsed:.1f} min")
+        figure, axis = plt.subplots(figsize=(9, 3))
+        for values, label in ((self.train, "training"), (self.validation, "validation")):
+            if values:
+                axis.plot([r["step"] for r in values], [r["weighted_loss"] for r in values],
+                          label=label, linewidth=1.3)
+        axis.set(xlabel="update", ylabel="denoising loss")
         axis.grid(alpha=.25)
         axis.legend()
         figure.tight_layout()
-        display(figure)
-        plt.close(figure)
-    else:
-        print("Preparing the dataset and model; loss points will appear shortly.")
+        try:
+            self.plot_display.clear_output(wait=True)
+            with self.plot_display:
+                display(figure)
+        finally:
+            plt.close(figure)
 
-    print("\nLatest training messages:\n" + _tail(log_path))
 
+def run_with_dashboard(command: Sequence[str], run_dir: str | Path, max_updates: int) -> None:
+    """Stream all logs and refresh the plot when the trainer emits a metric."""
+    import os
+    import re
 
-def run_with_dashboard(
-    command: Sequence[str],
-    run_dir: str | Path,
-    max_updates: int,
-    *,
-    refresh_seconds: float = 5.0,
-) -> None:
-    """Run training and refresh loss curves until the subprocess exits."""
     run_dir = Path(run_dir)
     run_dir.parent.mkdir(parents=True, exist_ok=True)
     if run_dir.exists():
         raise FileExistsError(f"Choose a new run directory; this one already exists: {run_dir}")
-    # Keep the log beside the run initially. The trainer must create run_dir
-    # itself, otherwise its collision protection deliberately selects a suffix.
     log_path = run_dir.parent / f".{run_dir.name}.training.log"
-    started = time.time()
+    view = _TrainingDisplay(max_updates)
+    environment = dict(os.environ, BYOD_NOTEBOOK="1", PYTHONUNBUFFERED="1")
     with log_path.open("w") as log:
         process = subprocess.Popen(
-            list(command),
-            stdout=log,
-            stderr=subprocess.STDOUT,
-            text=True,
+            list(command), stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            text=True, errors="replace", bufsize=1, env=environment,
         )
         try:
-            while process.poll() is None:
-                _show(run_dir, log_path, max_updates, started)
-                time.sleep(refresh_seconds)
-        except KeyboardInterrupt:
-            process.terminate()
-            process.wait(timeout=30)
+            for line in process.stdout:
+                log.write(line)
+                log.flush()
+                text = line.strip()
+                if text.startswith("__BYOD_METRIC__"):
+                    view.record(json.loads(text[len("__BYOD_METRIC__"):]))
+                elif re.search(r"\d+%.*\|", text):
+                    # tqdm carriage-return updates share one display, never the log history.
+                    if not text.startswith("training:"):
+                        view.status(text)
+                elif text:
+                    print(line, end="", flush=True)
+            process.wait()
+        except BaseException:
+            if process.poll() is None:
+                process.terminate()
+                process.wait(timeout=30)
             raise
-    _show(run_dir, log_path, max_updates, started)
+        finally:
+            process.stdout.close()
     if run_dir.is_dir():
         log_path = log_path.replace(run_dir / "colab_training.log")
     if process.returncode:
         error = training_error_excerpt(log_path.read_text(errors="replace"))
         print(f"\nTraining failed. Full log: {log_path}\n\n{error}", flush=True)
         raise subprocess.CalledProcessError(process.returncode, command, output=error)
-    print(f"\nFinished. Artifacts are in {run_dir}")
+    view.status(f"Finished: {max_updates:,} updates")
+    print(f"\nArtifacts: {run_dir}")

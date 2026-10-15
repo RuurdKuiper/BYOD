@@ -43,13 +43,12 @@ def load_training_config(
             )
         # Keep the complete 25k-update recipe and dataset budget. Quick mode
         # reduces memory through the smaller backbone and rank-128 adapters;
-        # FP16 is used because common Colab T4 GPUs do not support BF16/FP8.
+        # FP16 is used because common Colab T4 GPUs do not support BF16.
         quick_output_name = quick_preset.pop("output_name")
         config.update({
             "lora_r": 128,
             "lora_alpha": 128,
             "precision": "fp16",
-            "fp8": {"enabled": False},
         })
         config.update(quick_preset)
         output_name = quick_output_name
@@ -75,6 +74,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output-dir")
     parser.add_argument("--max-updates", type=int, help="Optional run-length override")
     parser.add_argument("--print-config", action="store_true")
+    parser.add_argument("--logging-steps", type=int, help="Loss logging interval in optimizer updates")
     parser.add_argument("--prepared-data-cache-dir", help="Local tokenized-data cache")
     parser.add_argument("--prepared-data-persistent-cache-dir", help="Persistent backup restored into the local tokenized cache")
     return parser.parse_args()
@@ -91,6 +91,10 @@ def main() -> None:
         prepared_data_cache_dir=args.prepared_data_cache_dir,
         prepared_data_persistent_cache_dir=args.prepared_data_persistent_cache_dir,
     )
+    if args.logging_steps is not None:
+        if args.logging_steps < 1:
+            raise ValueError("logging_steps must be positive")
+        config["logging_steps"] = args.logging_steps
     print(
         f"Training {config['display_name']} in {args.mode!r} mode for "
         f"{config['max_updates']:,} updates -> {config['output_dir']}",

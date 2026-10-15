@@ -70,6 +70,5 @@ generation_perplexity:
   seed: 1234
 
 precision: bf16
-fp8: {enabled: true, backend: transformer_engine, format: HYBRID}
 quantization: none
 optimizer: adamw
