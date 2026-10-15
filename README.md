@@ -51,6 +51,38 @@ objective, data, validation, and optimization settings are retained; it uses
 FP16 instead of BF16/FP8 for compatibility with common Colab GPUs.
 Here, “quick” refers to the smaller memory requirement, not a shortened run.
 
+## Notebook setup
+
+The default notebook install uses `.[colab]`: the core training dependencies and
+notebook widgets. It reuses compatible installed packages and shows progress and
+elapsed time for each setup stage. It does not request Transformer Engine,
+bitsandbytes, or TorchAO. Quick mode uses FP16 with unquantized weights and AdamW,
+so none of those optional acceleration packages are needed.
+
+After choosing the run mode, the notebook's separate FP8 setup cell installs
+Transformer Engine only for paper mode on a supported native-FP8 GPU. Its PyTorch
+extension may need a lengthy CUDA compilation. The paper configuration retains
+the documented BF16 fallback on other GPUs; it is not silently changed to disable
+FP8 on capable hardware. For a local paper run requiring FP8, install it with:
+
+```bash
+python -m pip install --no-build-isolation 'transformer-engine[pytorch]==2.13.0'
+```
+
+The `fp8` extra declares the same dependency. The separate `cuda` extra supplies
+bitsandbytes for optional 4-bit inference or 8-bit optimizers, neither of which
+is used by the shipped training presets.
+
+Old preinstalled TorchAO versions below 0.16 can cause PEFT imports to fail even
+without quantization. Setup removes only those known-incompatible versions and
+leaves absent or newer installations alone. The checkout's root and `src` paths
+are added to the running kernel explicitly, so editable installation does not
+require restarting the kernel just to discover `diffusion_lm`.
+
+Faster installation does not remove model/data download time or shorten the
+25,000-update training schedule. For a brief CLI smoke run, use
+`python train.py --model llama --mode quick --max-updates 2`.
+
 ## Local use
 
 ```bash
@@ -140,7 +172,7 @@ Edit `models` in each configuration to select trained adapters and optionally
 hosted LLaDA. The nine-task profile uses 125 examples per task and evaluates the
 unchanged AR parent. The open-ended profile uses 100 bundled prompts, 128-token
 answers, and 64 denoising steps, then scores with Phi-4. Its 4-bit scorer requires
-CUDA and `bitsandbytes` (included in the `colab` extra). GPQA and gated parent
+CUDA and `bitsandbytes` (install with `pip install -e '.[cuda]'`). GPQA and gated parent
 models require the corresponding Hugging Face access.
 
 HumanEval and MBPP scoring executes generated Python in subprocesses. Run those
