@@ -835,23 +835,28 @@ def test_sixth_notebook_cell_loads_saved_adapter_and_answers_on_cpu(tmp_path, mo
         return Tokenizer()
     monkeypatch.setattr(inference_module.AutoTokenizer, "from_pretrained", tokenizer)
     monkeypatch.setattr(inference_module, "select_device", lambda requested: torch.device("cpu"))
-    monkeypatch.setattr("builtins.input", lambda prompt: "Explain diffusion.")
-    answers = []
-    monkeypatch.setattr(IPython.display, "display", answers.append)
+    import importlib
+    from diffusion_lm import demo as demo_module
+    monkeypatch.setattr(importlib, "reload", lambda module: module)
+    launches = []
+    monkeypatch.setattr(demo_module.InferenceDemo, "launch", lambda self, **kwargs: launches.append(kwargs))
     notebook = json.loads((Path(__file__).parents[1] / "notebooks/train_diffusion.ipynb").read_text())
     cells = [cell for cell in notebook["cells"] if cell["cell_type"] == "code"]
     assert len(cells) == 6
-    source = "".join(cells[5]["source"])
     namespace = {"run_dir": run}
-    exec(compile(source, "colab-inference", "exec"), namespace)
-    first_session = namespace["dlm_session"]
+    exec(compile("".join(cells[5]["source"]), "colab-inference", "exec"), namespace)
+    controller = namespace["inference_demo"]
+    assert launches == [{"share": True, "inline": False}]
+    states = list(controller.generate("best", "Explain diffusion.", max_new_tokens=8, num_steps=4))
+    first_session = controller.session
     assert first_session.adapter_path == (run / "best").resolve()
     assert first_session.model.peft_config["default"].inference_mode
     assert revisions == [revision]
-    assert answers and isinstance(answers[0].data, str)
-    exec(compile(source, "colab-inference", "exec"), namespace)
-    assert namespace["dlm_session"] is first_session
-    assert revisions == [revision] and len(answers) == 2
+    assert len(states) == 5  # Loading acknowledgment, then every iteration.
+    assert "step 1/4" in states[1][0] and "step 4/4" in states[-1][0]
+    assert "Denoising step 4/4" in states[-1][1]
+    list(controller.generate("best", "Another question", max_new_tokens=8, num_steps=4))
+    assert controller.session is first_session and revisions == [revision]
     # Exercise the exact 64-token budget that previously failed at update 1,000.
     from train import load_training_config
     from diffusion_lm.training import _generation_inference_settings

@@ -70,7 +70,7 @@ def test_default_extra_has_no_fp8_or_quantization_dependency():
     tomllib = pytest.importorskip("tomllib")
 
     extras = tomllib.loads((ROOT / "pyproject.toml").read_text())["project"]["optional-dependencies"]
-    assert extras["colab"] == ["ipywidgets>=8"]
+    assert extras["colab"] == ["ipywidgets>=8", "gradio>=6,<7"]
     assert "fp8" not in extras
     assert "fp8" not in (ROOT / "notebooks/train_diffusion.ipynb").read_text().lower()
     assert extras["cuda"] == ["bitsandbytes>=0.45"]
