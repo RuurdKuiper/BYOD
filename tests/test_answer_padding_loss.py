@@ -119,7 +119,8 @@ def test_invalid_separate_loss_configuration_fails(updates):
 
 
 @pytest.mark.parametrize("selected_logits", [False, True])
-def test_tiny_training_saves_answer_padding_components(tmp_path, monkeypatch, selected_logits):
+@pytest.mark.parametrize("interrupt", [False, True])
+def test_tiny_training_saves_answer_padding_components(tmp_path, monkeypatch, selected_logits, interrupt):
     from datasets import Dataset, DatasetDict
     from transformers import LlamaConfig, LlamaForCausalLM
     from peft import LoraConfig, get_peft_model
@@ -150,7 +151,10 @@ def test_tiny_training_saves_answer_padding_components(tmp_path, monkeypatch, se
     before = {name: p.detach().clone() for name, p in model.named_parameters() if p.requires_grad}
     monkeypatch.setattr(training, "load_denoising_model", lambda config: (model, {}))
     saved = []
-    monkeypatch.setattr(training, "_save_adapter", lambda model, tokenizer, path, norms: saved.append(path))
+    def save(model, tokenizer, path, norms):
+        path.mkdir(parents=True, exist_ok=True)
+        saved.append(path)
+    monkeypatch.setattr(training, "_save_adapter", save)
     config = {
         **base_config(), "dataset_name": "tiny-local", "model_name_or_path": "tiny-local",
         "output_dir": str(tmp_path / "output"), "cache_dir": str(tmp_path / "cache"),
@@ -162,6 +166,20 @@ def test_tiny_training_saves_answer_padding_components(tmp_path, monkeypatch, se
         "frontier_masking_probability": .75, "t_min": .2,
         "selected_logit_optimization": selected_logits,
     }
+    if interrupt:
+        append = training._append_jsonl
+        def interrupt_after_update(path, record):
+            append(path, record)
+            if record.get("split") == "train":
+                raise KeyboardInterrupt
+        monkeypatch.setattr(training, "_append_jsonl", interrupt_after_update)
+        with pytest.raises(KeyboardInterrupt):
+            training.run_training(config)
+        interrupted = tmp_path / "output/interrupted"
+        assert interrupted in saved
+        assert json.loads((interrupted / "state.json").read_text())["step"] == 1
+        assert any(not torch.equal(before[name], p) for name, p in model.named_parameters() if name in before)
+        return
     training.run_training(config)
     output = tmp_path / "output"
     records = [json.loads(line) for line in (output / "metrics.jsonl").read_text().splitlines()]

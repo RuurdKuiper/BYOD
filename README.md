@@ -6,6 +6,7 @@ model on one GPU.
 [![Open in Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/RuurdKuiper/BYOD/blob/main/notebooks/train_diffusion.ipynb)
 
 Start with the notebook to select a model, train, and watch the loss curves.
+Step 6 lets you ask the trained DLM questions, including from a saved interrupted run.
 Try the trained models in the hosted demos:
 [Llama](https://huggingface.co/spaces/Dovelove/byod-llama-3.1-8b),
 [Gemma](https://huggingface.co/spaces/Dovelove/byod-gemma-2-9b),

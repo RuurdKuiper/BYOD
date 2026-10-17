@@ -804,3 +804,58 @@ def test_official_llada_sampler_also_supports_native_adapter_prompts():
         {"role": "system", "content": "System"},
         {"role": "user", "content": "Question"},
     ]
+
+
+def test_sixth_notebook_cell_loads_saved_adapter_and_answers_on_cpu(tmp_path, monkeypatch):
+    from transformers import LlamaConfig, LlamaForCausalLM
+    from peft import LoraConfig, get_peft_model
+    from test_data_corruption_loss import ToyTokenizer
+    import IPython.display
+
+    base_dir = tmp_path / "base"
+    LlamaForCausalLM(LlamaConfig(vocab_size=16, hidden_size=16, intermediate_size=32,
+        num_hidden_layers=1, num_attention_heads=2, num_key_value_heads=2)).save_pretrained(base_dir)
+    base = LlamaForCausalLM.from_pretrained(base_dir)
+    model = get_peft_model(base, LoraConfig(r=2, target_modules=["q_proj", "v_proj"], bias="none"))
+    run = tmp_path / "run"
+    model.save_pretrained(run / "best")
+    revision = "a" * 40
+    (run / "resolved_config.json").write_text(json.dumps({
+        "model_revision": revision, "precision": "fp32", "tokenizer_name_or_path": "toy",
+    }))
+
+    class Tokenizer(ToyTokenizer):
+        pad_token_id = 0
+        def decode(self, ids, **kwargs):
+            return super().decode(ids)
+
+    revisions = []
+    def tokenizer(*args, **kwargs):
+        revisions.append(kwargs["revision"])
+        return Tokenizer()
+    monkeypatch.setattr(inference_module.AutoTokenizer, "from_pretrained", tokenizer)
+    monkeypatch.setattr(inference_module, "select_device", lambda requested: torch.device("cpu"))
+    monkeypatch.setattr("builtins.input", lambda prompt: "Explain diffusion.")
+    answers = []
+    monkeypatch.setattr(IPython.display, "display", answers.append)
+    notebook = json.loads((Path(__file__).parents[1] / "notebooks/train_diffusion.ipynb").read_text())
+    cells = [cell for cell in notebook["cells"] if cell["cell_type"] == "code"]
+    assert len(cells) == 6
+    source = "".join(cells[5]["source"])
+    namespace = {"run_dir": run}
+    exec(compile(source, "colab-inference", "exec"), namespace)
+    first_session = namespace["dlm_session"]
+    assert first_session.adapter_path == (run / "best").resolve()
+    assert first_session.model.peft_config["default"].inference_mode
+    assert revisions == [revision]
+    assert answers and isinstance(answers[0].data, str)
+    exec(compile(source, "colab-inference", "exec"), namespace)
+    assert namespace["dlm_session"] is first_session
+    assert revisions == [revision] and len(answers) == 2
+    # Exercise the exact 64-token budget that previously failed at update 1,000.
+    from train import load_training_config
+    from diffusion_lm.training import _generation_inference_settings
+    settings = _generation_inference_settings(load_training_config("llama", "quick"))
+    answer = llada_generate(first_session, "A question", gen_length=settings["max_new_tokens"],
+                           steps=settings["num_steps"], block_length=settings["block_length"])
+    assert isinstance(answer, str)

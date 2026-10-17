@@ -6,6 +6,7 @@ from importlib import metadata
 import json
 from pathlib import Path
 import subprocess
+import signal
 import sys
 import time
 from typing import Sequence
@@ -101,7 +102,7 @@ def run_with_dashboard(command: Sequence[str], run_dir: str | Path, max_updates:
     with log_path.open("w") as log:
         process = subprocess.Popen(
             list(command), stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-            text=True, errors="replace", bufsize=1, env=environment,
+            text=True, errors="replace", bufsize=1, env=environment, start_new_session=True,
         )
         # Keep tqdm carriage returns so the notebook can replace the same line.
         process.stdout.reconfigure(newline="")
@@ -117,10 +118,22 @@ def run_with_dashboard(command: Sequence[str], run_dir: str | Path, max_updates:
                 if marker:
                     view.record(json.loads(payload))
             process.wait()
-        except BaseException:
+        except BaseException as error:
             if process.poll() is None:
-                process.terminate()
-                process.wait(timeout=30)
+                process.send_signal(signal.SIGINT if isinstance(error, KeyboardInterrupt) else signal.SIGTERM)
+                print("\nStopping training; waiting for the trainer to exit…", flush=True)
+                try:
+                    remaining, _ = process.communicate(timeout=60)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    remaining, _ = process.communicate()
+                log.write(remaining or "")
+                for message in (remaining or "").splitlines():
+                    if "adapter saved to" in message:
+                        print(message, flush=True)
+            if run_dir.is_dir():
+                log.flush()
+                log_path.replace(run_dir / "colab_training.log")
             raise
         finally:
             process.stdout.close()
@@ -132,3 +145,18 @@ def run_with_dashboard(command: Sequence[str], run_dir: str | Path, max_updates:
         raise subprocess.CalledProcessError(process.returncode, command, output=error)
     view.status(f"Finished: {max_updates:,} updates")
     print(f"\nArtifacts: {run_dir}")
+
+
+def saved_checkpoint(run_dir: str | Path) -> Path:
+    """Prefer the interrupted adapter, then the best, then the latest snapshot."""
+    root = Path(run_dir)
+    candidates = [root / "interrupted", root / "best", root / "final"]
+    snapshots = sorted(root.glob("checkpoint-*"),
+                       key=lambda p: int(p.name.split("-")[-1]) if p.name.split("-")[-1].isdigit() else -1,
+                       reverse=True)
+    for path in [*candidates, *snapshots]:
+        if (path / "adapter_config.json").is_file() and any(
+            (path / name).is_file() for name in ("adapter_model.safetensors", "adapter_model.bin")
+        ):
+            return path
+    raise FileNotFoundError("No saved adapter yet. Run training until a checkpoint is saved, then try again.")

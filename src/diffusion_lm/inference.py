@@ -115,6 +115,7 @@ def _load_adapter_path(
         tokenizer_kwargs["fix_mistral_regex"] = True
     tokenizer = AutoTokenizer.from_pretrained(
         tokenizer_name,
+        revision=run_config.get("model_revision"),
         use_fast=True,
         token=token,
         cache_dir=cache_dir,
@@ -123,7 +124,7 @@ def _load_adapter_path(
     )
     if tokenizer.pad_token_id is None:
         tokenizer.pad_token = tokenizer.eos_token
-    load_kwargs: dict[str, Any] = dict(torch_dtype=dtype, token=token, cache_dir=cache_dir, trust_remote_code=False)
+    load_kwargs: dict[str, Any] = dict(torch_dtype=dtype, token=token, cache_dir=cache_dir, trust_remote_code=False, revision=run_config.get("model_revision"))
     if use_4bit:
         if device.type != "cuda":
             raise RuntimeError("4-bit inference requires an NVIDIA CUDA device.")

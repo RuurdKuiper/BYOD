@@ -117,3 +117,49 @@ def test_graph_keeps_all_loss_points_without_clearing_log_output(monkeypatch):
     assert list(figures[-1].axes[0].lines[0].get_xdata()) == [1, 2]
     assert list(figures[-1].axes[0].lines[1].get_ydata()) == [1.2]
     assert "2/3 updates" in view.status_display.value
+
+
+def test_checkpoint_selection_after_failed_or_interrupted_training(tmp_path):
+    def adapter(name):
+        folder = tmp_path / name
+        folder.mkdir()
+        (folder / "adapter_config.json").write_text("{}")
+        (folder / "adapter_model.safetensors").write_bytes(b"saved")
+        return folder
+    with pytest.raises(FileNotFoundError, match="No saved adapter"):
+        notebook.saved_checkpoint(tmp_path)
+    old = adapter("checkpoint-250")
+    latest = adapter("checkpoint-1000")
+    assert notebook.saved_checkpoint(tmp_path) == latest
+    best = adapter("best")
+    assert notebook.saved_checkpoint(tmp_path) == best
+    interrupted = adapter("interrupted")
+    assert notebook.saved_checkpoint(tmp_path) == interrupted
+    (interrupted / "adapter_model.safetensors").unlink()
+    assert notebook.saved_checkpoint(tmp_path) == best
+
+
+def test_notebook_stop_sends_interrupt_and_waits_for_saved_adapter(tmp_path, monkeypatch):
+    import json
+    run = tmp_path / "run"
+    def interrupt(record):
+        raise KeyboardInterrupt
+    monkeypatch.setattr(notebook, "_TrainingDisplay", lambda *a: SimpleNamespace(record=interrupt))
+    code = f'''
+import time
+from pathlib import Path
+folder = Path({str(run)!r})
+folder.mkdir()
+try:
+    print('__BYOD_METRIC__{{"split":"train","step":1,"weighted_loss":1.0}}', flush=True)
+    while True:
+        time.sleep(.05)
+except KeyboardInterrupt:
+    (folder / "interrupted").mkdir()
+    (folder / "interrupted" / "state.json").write_text('{{"step":1}}')
+    print("adapter saved to interrupted", flush=True)
+'''
+    with pytest.raises(KeyboardInterrupt):
+        notebook.run_with_dashboard([sys.executable, "-u", "-c", code], run, 2)
+    assert json.loads((run / "interrupted/state.json").read_text())["step"] == 1
+    assert "adapter saved to interrupted" in (run / "colab_training.log").read_text()

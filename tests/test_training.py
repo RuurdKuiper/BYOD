@@ -275,3 +275,22 @@ def test_worker_count_without_affinity_uses_cpu_count(monkeypatch):
     assert training._worker_count(4) == 1
     with pytest.raises(ValueError, match="num_workers"):
         training._worker_count(-1)
+
+
+@pytest.mark.parametrize("model,mode", [("llama", "quick"), ("gemma", "quick"), ("qwen", "quick"),
+                                         ("llama", "paper"), ("gemma", "paper"), ("qwen", "paper"), ("ministral", "paper")])
+def test_shipped_generation_budgets_match_the_64_token_diagnostic(model, mode):
+    from train import load_training_config
+    settings = _generation_inference_settings(load_training_config(model, mode))
+    assert settings["max_new_tokens"] == settings["block_length"] == 64
+    assert settings["num_steps"] == 32
+
+
+@pytest.mark.parametrize("budgets", [
+    {"max_new_tokens": 64, "block_length": 128},
+    {"max_new_tokens": 64, "block_length": 16, "num_steps": 3},
+    {"max_new_tokens": 0}, {"block_length": 0},
+])
+def test_invalid_generation_budgets_fail_before_sampling(budgets):
+    with pytest.raises(ValueError, match="Generation requires"):
+        _generation_inference_settings({"generation_perplexity": budgets})
