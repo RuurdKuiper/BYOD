@@ -1,0 +1,4 @@
+# Applied on top of paper.yaml for the smaller quick-mode models.
+lora_r: 128
+lora_alpha: 128
+precision: fp16

@@ -39,8 +39,7 @@ This version uses FP16/BF16 training without FP8.
 
 Training downloads the matching [pretokenized dataset](https://huggingface.co/datasets/Ruurd/BYOD-tokenized-256)
 automatically. Each profile covers the default 400,000-example training budget.
-The recipe and model revisions are in [`configs/`](configs/). Random masking is
-sampled online, with answer/padding losses weighted 0.9/0.1.
+Random masking is sampled online, with answer/padding losses weighted 0.9/0.1.
 See [reproducibility notes](REPRODUCIBILITY.md) for provenance and validation limits.
 
 Runs save metrics, checkpoints, and the best adapter under `outputs/`.
@@ -49,6 +48,25 @@ Merge an adapter into its base model with:
 ```bash
 python merge_adapter.py outputs/llama-3.1-8b-mask/best merged/llama
 ```
+
+## Change settings or data
+
+Edit [`configs/paper.yaml`](configs/paper.yaml) for shared hyperparameters,
+[`configs/quick.yaml`](configs/quick.yaml) for quick-mode overrides, and
+[`configs/models.yaml`](configs/models.yaml) for model choices. To override a
+preset without editing it, copy and edit [`configs/custom.example.yaml`](configs/custom.example.yaml):
+
+```bash
+python train.py --model llama --mode quick --config configs/my_run.yaml
+```
+
+In Colab, enter the file path in **Config YAML**. Overrides apply after the
+selected preset; CLI flags take precedence. Set `dataset_name` to your Hugging
+Face dataset; it needs text columns `instruction` and `output` (`input` is optional).
+Use `dataset_columns: {instruction: question, output: answer}` for other names.
+Missing validation/test splits are reserved from train using seed 42. Custom
+data is tokenized once using the selected model and cached, including on Drive
+when enabled. Random training masking is still sampled online.
 
 ## Evaluate
 

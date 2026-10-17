@@ -13,7 +13,7 @@ SPLITS = ("train", "validation", "test")
 
 
 def preparation_metadata(config, tokenizer, train_sample_limit):
-    return {
+    metadata = {
         "format": 2, "dataset": config["dataset_name"],
         "dataset_revision": config.get("dataset_revision"), "config": config.get("dataset_config"),
         "splits": config.get("splits", {"train": "train", "validation": "validation", "test": "test"}),
@@ -24,6 +24,11 @@ def preparation_metadata(config, tokenizer, train_sample_limit):
         "include_answer_eos": bool(config.get("include_answer_eos", True)),
         "train_sample_limit": train_sample_limit, "seed": int(config.get("seed", 42)),
     }
+
+    for key in ("dataset_columns", "heldout_fraction"):
+        if key in config:
+            metadata[key] = config[key]
+    return metadata
 
 
 def preparation_key(metadata):

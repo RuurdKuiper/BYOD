@@ -118,10 +118,12 @@ def test_training_cleans_environment_before_import_and_logs_every_update(monkeyp
     namespace = {
         "REPOSITORY_DIR": ROOT, "mode": SimpleNamespace(value=mode),
         "model": SimpleNamespace(value="llama"), "save_to_drive": SimpleNamespace(value=False),
+        "config_file": SimpleNamespace(value="configs/my_run.yaml"),
     }
     exec(compile(code_cell("run_with_dashboard"), "notebook-training", "exec"), namespace)
     assert events == ["reload", "cleanup", "reload"]
     command = commands[0]
     assert command[command.index("--logging-steps") + 1] == "1"
+    assert command[command.index("--config") + 1] == "configs/my_run.yaml"
     assert "-u" in command
     assert command[command.index("--prepared-data-cache-dir") + 1] == "/content/BYOD-cache/prepared"

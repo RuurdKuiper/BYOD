@@ -378,11 +378,8 @@ def load_training_data(config: dict[str, Any], train_sample_limit: int | None, a
         else:
             data = load_published_prepared_data(config, tokenizer, train_sample_limit)
             if data is None:
-                raise ValueError(
-                    "No compatible published token profile for this recipe. "
-                    "Use a shipped preset within its 400,000-example training budget, "
-                    "or configure a matching published dataset and revision."
-                )
+                from .custom_data import tokenize_dataset
+                data = tokenize_dataset(config, tokenizer, train_sample_limit)
             for split, dataset in data.items():
                 dataset.save_to_disk(str(local / split))
         persist_prepared_cache(local, persistent)

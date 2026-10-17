@@ -17,6 +17,7 @@ def load_training_config(
     model: str,
     mode: str = "paper",
     *,
+    config_path: str | None = None,
     output_dir: str | None = None,
     max_updates: int | None = None,
     prepared_data_cache_dir: str | None = None,
@@ -46,21 +47,32 @@ def load_training_config(
         # reduces memory through the smaller backbone and rank-128 adapters;
         # FP16 is used because common Colab T4 GPUs do not support BF16.
         quick_output_name = quick_preset.pop("output_name")
-        config.update({
-            "lora_r": 128,
-            "lora_alpha": 128,
-            "precision": "fp16",
-        })
+        config.update(yaml.safe_load((ROOT / "configs" / "quick.yaml").read_text()))
         config.update(quick_preset)
         output_name = quick_output_name
     elif mode != "paper":
         raise ValueError("mode must be 'quick' or 'paper'")
 
+    if config_path:
+        overrides = yaml.safe_load(Path(config_path).read_text()) or {}
+        if not isinstance(overrides, dict):
+            raise ValueError("The override config must be a YAML mapping")
+        def merge(base, update):
+            for key, value in update.items():
+                if isinstance(value, dict) and isinstance(base.get(key), dict):
+                    merge(base[key], value)
+                else:
+                    base[key] = value
+        merge(config, overrides)
+        if "dataset_name" in overrides and "prepared_dataset_name" not in overrides:
+            config["prepared_dataset_name"] = None
+            config["dataset_revision"] = overrides.get("dataset_revision")
+
     if max_updates is not None:
         if max_updates < 1:
             raise ValueError("max_updates must be positive")
         config["max_updates"] = int(max_updates)
-    config["output_dir"] = output_dir or f"outputs/{output_name}"
+    config["output_dir"] = output_dir or config.get("output_dir", f"outputs/{output_name}")
     if prepared_data_cache_dir is not None:
         config["prepared_data_cache_dir"] = prepared_data_cache_dir
     if prepared_data_persistent_cache_dir is not None:
@@ -72,6 +84,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--model", required=True, choices=["llama", "gemma", "qwen", "ministral"])
     parser.add_argument("--mode", choices=["quick", "paper"], default="paper")
+    parser.add_argument("--config", help="YAML overrides applied after the selected preset")
     parser.add_argument("--output-dir")
     parser.add_argument("--max-updates", type=int, help="Optional run-length override")
     parser.add_argument("--print-config", action="store_true")
@@ -87,6 +100,7 @@ def main() -> None:
     config = load_training_config(
         args.model,
         args.mode,
+        config_path=args.config,
         output_dir=args.output_dir,
         max_updates=args.max_updates,
         prepared_data_cache_dir=args.prepared_data_cache_dir,

@@ -76,8 +76,15 @@ def test_incomplete_cache_is_downloaded_again(tmp_path, monkeypatch):
     assert len(downloads) == 2 and cache_complete(persistent)
 
 
-def test_missing_profile_fails_without_raw_preparation(tmp_path, monkeypatch):
+def test_missing_profile_uses_custom_tokenization_once_then_caches(tmp_path, monkeypatch):
     config, _ = setup_data(tmp_path, monkeypatch)
     monkeypatch.setattr("diffusion_lm.prepared_cache.load_published_prepared_data", lambda *a: None)
-    with pytest.raises(ValueError, match="No compatible published token profile"):
-        training.load_training_data(config, 3)
+    calls = []
+    def tokenize(*args):
+        calls.append(True)
+        return DatasetDict({split: Dataset.from_list([{"_lad_clean_ids": [7, 2], "_index": 0}])
+                            for split in ("train", "validation", "test")})
+    monkeypatch.setattr("diffusion_lm.custom_data.tokenize_dataset", tokenize)
+    training.load_training_data(config, 3)
+    training.load_training_data(config, 3)
+    assert calls == [True]

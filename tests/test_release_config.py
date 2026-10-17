@@ -174,3 +174,34 @@ def test_training_cli_forwards_cache_options(monkeypatch):
     assert config["prepared_data_cache_dir"] == "/tmp/local-prepared"
     assert config["prepared_data_persistent_cache_dir"] == "/tmp/persistent-prepared"
     assert config["num_workers"] == 4
+
+
+def test_yaml_overrides_apply_after_quick_preset_and_cli_takes_precedence(tmp_path):
+    path = tmp_path / "run.yaml"
+    path.write_text('''learning_rate: 0.0002
+lora_r: 16
+max_updates: 17
+output_dir: outputs/custom
+answer_padding_loss: {answer_weight: 0.8, padding_weight: 0.2}
+dataset_name: account/custom
+dataset_columns: {instruction: question, output: answer}
+''')
+    config = load_training_config("llama", "quick", config_path=str(path), max_updates=2)
+    assert config["learning_rate"] == .0002 and config["lora_r"] == 16
+    assert config["max_updates"] == 2 and config["output_dir"] == "outputs/custom"
+    assert config["answer_padding_loss"] == {"enabled": True, "answer_weight": .8, "padding_weight": .2}
+    assert config["dataset_revision"] is None and config["prepared_dataset_name"] is None
+    assert config["dataset_columns"]["instruction"] == "question"
+
+
+def test_custom_config_cli_is_forwarded(tmp_path, monkeypatch):
+    import sys
+    from types import SimpleNamespace
+    import train
+    path = tmp_path / "run.yaml"
+    path.write_text("learning_rate: 0.0002\n")
+    configs = []
+    monkeypatch.setitem(sys.modules, "diffusion_lm.training", SimpleNamespace(run_training=configs.append))
+    monkeypatch.setattr(sys, "argv", ["train.py", "--model", "llama", "--mode", "quick", "--config", str(path)])
+    train.main()
+    assert configs[0]["learning_rate"] == .0002

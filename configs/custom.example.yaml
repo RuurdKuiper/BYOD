@@ -1,0 +1,13 @@
+# Copy this file and pass it with --config (or CONFIG_PATH in Colab).
+learning_rate: 1.0e-5
+max_updates: 1000
+
+# A Hugging Face dataset with instruction/output columns (input is optional).
+dataset_name: YOUR_ACCOUNT/YOUR_DATASET
+dataset_revision: null  # Prefer a commit hash for reproducible runs.
+# dataset_config: default  # Optional Hub subset name.
+# Map your source columns to the expected names, if needed:
+# dataset_columns: {instruction: question, output: answer}
+# splits: {train: train, validation: validation, test: test}
+# Missing validation/test splits are reserved from train with seed 42.
+heldout_fraction: 0.05
