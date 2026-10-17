@@ -452,6 +452,10 @@ def run_training(config: dict[str, Any]) -> dict[str, Any]:
     checkpoint_mode = config.get("checkpoint_mode", "only_best_model")
     if checkpoint_mode not in {"only_best_model", "every_checkpoint", "every_model"}:
         raise ValueError("checkpoint_mode must be 'only_best_model', 'every_model', or 'every_checkpoint'")
+    validation_steps = int(config.get("validation_steps", 100))
+    checkpoint_steps = int(config.get("checkpoint_steps", 500))
+    if min(validation_steps, checkpoint_steps) < 1:
+        raise ValueError("validation_steps and checkpoint_steps must be positive")
     generation_settings = config.get("generation_perplexity", {})
     generation_interval = _generation_perplexity_interval(config) if generation_settings.get("enabled", False) else None
     if generation_interval is not None:
@@ -630,7 +634,7 @@ def run_training(config: dict[str, Any]) -> dict[str, Any]:
                 _append_jsonl(metrics_path, {"split": "train", "step": update_step, "weighted_loss": loss_value,
                                             "supervised_tokens": supervised_tokens,
                                             **{name: info[name].item() for name in interval_component_sums}})
-            if update_step % int(config.get("validation_steps", 100)) == 0 or update_step == max_updates:
+            if update_step % validation_steps == 0 or update_step % checkpoint_steps == 0 or update_step == max_updates:
                 metrics = evaluate(model, val_loader, accelerator, config["corruption_mode"], config.get("structured_loss_behavior") == "all_tokens", bool(config.get("eos_padding_loss", False)), answer_padding_weights)
                 if accelerator.is_main_process:
                     generation_due = generation_interval is not None and (update_step % generation_interval == 0 or update_step == max_updates)
@@ -663,7 +667,7 @@ def run_training(config: dict[str, Any]) -> dict[str, Any]:
                         best = metrics["weighted_loss"]; unwrapped = accelerator.unwrap_model(model); _save_adapter(unwrapped, tokenizer, output / "best", initial_norms)
                 accelerator.wait_for_everyone()
                 model.train()
-            if checkpoint_mode in {"every_checkpoint", "every_model"} and (update_step % int(config.get("checkpoint_steps", 500)) == 0 or update_step == max_updates):
+            if checkpoint_mode in {"every_checkpoint", "every_model"} and (update_step % checkpoint_steps == 0 or update_step == max_updates):
                 checkpoint = output / f"checkpoint-{update_step}"
                 if checkpoint_mode == "every_checkpoint":
                     accelerator.save_state(checkpoint, safe_serialization=True, save_embedding_layers=False)

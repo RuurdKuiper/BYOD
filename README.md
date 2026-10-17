@@ -42,7 +42,8 @@ automatically. Each profile covers the default 400,000-example training budget.
 Random masking is sampled online, with answer/padding losses weighted 0.9/0.1.
 See [reproducibility notes](REPRODUCIBILITY.md) for provenance and validation limits.
 
-Runs save metrics, checkpoints, and the best adapter under `outputs/`.
+Runs evaluate at each checkpoint and keep only `best/` under `outputs/`.
+Stopping training manually also saves `interrupted/`.
 Merge an adapter into its base model with:
 
 ```bash

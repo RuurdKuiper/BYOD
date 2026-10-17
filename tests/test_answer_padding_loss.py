@@ -162,7 +162,8 @@ def test_tiny_training_saves_answer_padding_components(tmp_path, monkeypatch, se
         "precision": "fp32", "batch_size": 2, "eval_batch_size": 3,
         "max_updates": 2, "gradient_accumulation_steps": 2, "max_sequence_length": 32,
         "pad_to_multiple_of": 8, "learning_rate": .01, "scheduler": "constant",
-        "logging_steps": 1, "validation_steps": 1, "num_workers": 0,
+        "logging_steps": 1, "validation_steps": 3, "checkpoint_steps": 1,
+        "checkpoint_mode": "only_best_model", "num_workers": 0,
         "frontier_masking_probability": .75, "t_min": .2,
         "selected_logit_optimization": selected_logits,
     }
@@ -190,5 +191,5 @@ def test_tiny_training_saves_answer_padding_components(tmp_path, monkeypatch, se
         assert record["weighted_loss"] == pytest.approx(.9 * record["answer_loss"] + .1 * record["padding_loss"], rel=1e-6)
     resolved = json.loads((output / "resolved_config.json").read_text())
     assert resolved["answer_padding_loss"] == config["answer_padding_loss"]
-    assert saved  # Best-checkpoint selection ran using the new validation objective.
+    assert set(saved) == {output / "best"}  # No numbered snapshots or final duplicate.
     assert any(not torch.equal(before[name], p) for name, p in model.named_parameters() if name in before)

@@ -20,6 +20,7 @@ def test_paper_presets_keep_the_original_recipe(model):
     assert config["answer_padding_loss"] == {
         "enabled": True, "answer_weight": 0.9, "padding_weight": 0.1,
     }
+    assert config["checkpoint_mode"] == "only_best_model"
     assert "fp8" not in config
     assert config["quantization"] == "none"
 
@@ -30,6 +31,7 @@ def test_quick_mode_is_explicitly_smaller():
     assert config["max_updates"] == 25_000
     assert config["lora_r"] == config["lora_alpha"] == 128
     assert config["model_name_or_path"] == "meta-llama/Llama-3.2-1B-Instruct"
+    assert config["checkpoint_mode"] == "only_best_model"
     assert "fp8" not in config
     assert config["quantization"] == "none"
     assert config["generation_perplexity"]["enabled"] is True
@@ -85,7 +87,7 @@ def test_llama_paper_config_preserves_historical_settings_with_confirmed_loss():
     )
     config = load_training_config("llama")
     runtime_fields = {
-        "fp8", "effective_batch_size", "fp8_active", "fp8_compute_capability",
+        "checkpoint_mode", "fp8", "effective_batch_size", "fp8_active", "fp8_compute_capability",
         "fp8_device_name", "fp8_requested", "learning_rate_scale",
         "resolved_learning_rate", "resolved_training_precision",
         "structured_marker_dropped", "training_sample_limit",

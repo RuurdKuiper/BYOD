@@ -53,7 +53,7 @@ prefetch_factor: 4
 logging_steps: 100
 validation_steps: 250
 checkpoint_steps: 1000
-checkpoint_mode: every_model
+checkpoint_mode: only_best_model
 
 generation_perplexity:
   enabled: true
