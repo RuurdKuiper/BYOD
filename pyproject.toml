@@ -27,10 +27,8 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-colab = [
-  "ipywidgets>=8",
-  "gradio>=6,<7",
-]
+colab = ["ipywidgets>=8"]
+demo = ["gradio>=6,<7"]
 cuda = ["bitsandbytes>=0.45"]
 test = ["pytest>=8", "ipython>=8", "gradio>=6,<7"]
 evaluation = ["math-verify[antlr4_13_2]>=0.8", "openai>=1.68"]

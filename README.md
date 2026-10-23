@@ -7,7 +7,9 @@ model on one GPU.
 
 Start with the notebook to select a model, train, and watch the loss curves.
 Step 6 opens an interactive inference page with generation settings and live
-denoising updates, including from a saved interrupted run.
+denoising updates, including from a saved interrupted run. Setup reuses Colab’s
+PyTorch/CUDA packages and installs Gradio only when you run step 6. For a local
+inference web app, install `pip install -e ".[demo]"`.
 Try the trained models in the hosted demos:
 [Llama](https://huggingface.co/spaces/Dovelove/byod-llama-3.1-8b),
 [Gemma](https://huggingface.co/spaces/Dovelove/byod-gemma-2-9b),

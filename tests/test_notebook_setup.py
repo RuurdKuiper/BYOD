@@ -22,15 +22,17 @@ def code_cell(marker):
     )
 
 
+@pytest.mark.parametrize("existing_checkout", [False, True])
 @pytest.mark.parametrize("torchao_version", [None, "0.10.0", "0.16.0"])
 def test_default_setup_imports_checkout_in_live_kernel_without_optional_cuda_builds(
-    tmp_path, monkeypatch, torchao_version,
+    tmp_path, monkeypatch, torchao_version, existing_checkout,
 ):
     checkout = tmp_path / "BYOD"
     package = checkout / "src/diffusion_lm"
     package.mkdir(parents=True)
     (package / "__init__.py").write_text("")
-    (checkout / ".git").mkdir()
+    if existing_checkout:
+        (checkout / ".git").mkdir()
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(sys, "path", sys.path.copy())
     monkeypatch.delitem(sys.modules, "diffusion_lm", raising=False)
@@ -44,8 +46,20 @@ def test_default_setup_imports_checkout_in_live_kernel_without_optional_cuda_bui
         return torchao_version
 
     monkeypatch.setattr(importlib.metadata, "version", version)
+    installed = {"torch": "2.8.0+cu126", "triton": "3.4.0", "nvidia-cublas-cu12": "12.6.4.1"}
+    monkeypatch.setattr(importlib.metadata, "distributions", lambda: [
+        SimpleNamespace(metadata={"Name": name}, version=value)
+        for name, value in {**installed, "gradio": "5.0.0"}.items()
+    ])
     commands = []
-    monkeypatch.setattr(subprocess, "run", lambda command, **kwargs: commands.append(command))
+    constraints = []
+
+    def run(command, **kwargs):
+        commands.append(command)
+        if "--constraint" in command:
+            constraints.extend(Path(command[command.index("--constraint") + 1]).read_text().splitlines())
+
+    monkeypatch.setattr(subprocess, "run", run)
     source = code_cell("def setup_step").replace(
         'Path("/content/BYOD")', f"Path({str(checkout)!r})",
     )
@@ -60,6 +74,11 @@ def test_default_setup_imports_checkout_in_live_kernel_without_optional_cuda_bui
     assert Path(namespace["diffusion_lm"].__file__) == package / "__init__.py"
     installs = [command for command in commands if "install" in command]
     assert len(installs) == 1 and ".[colab]" in installs[0]
+    assert set(constraints) == {f"{name}=={value}" for name, value in installed.items()}
+    if existing_checkout:
+        assert commands[0][-2:] == ["pull", "--ff-only"]
+    else:
+        assert "--depth" in commands[0] and "1" in commands[0]
     assert "-q" not in installs[0]
     assert bool([command for command in commands if "uninstall" in command]) == (
         torchao_version == "0.10.0"
@@ -70,10 +89,36 @@ def test_default_extra_has_no_fp8_or_quantization_dependency():
     tomllib = pytest.importorskip("tomllib")
 
     extras = tomllib.loads((ROOT / "pyproject.toml").read_text())["project"]["optional-dependencies"]
-    assert extras["colab"] == ["ipywidgets>=8", "gradio>=6,<7"]
+    assert extras["colab"] == ["ipywidgets>=8"]
+    assert extras["demo"] == ["gradio>=6,<7"]
     assert "fp8" not in extras
     assert "fp8" not in (ROOT / "notebooks/train_diffusion.ipynb").read_text().lower()
     assert extras["cuda"] == ["bitsandbytes>=0.45"]
+
+
+@pytest.mark.parametrize("gradio_version", [None, "5.49.0", "6.0.0", "6.17.3", "7.0.0"])
+def test_inference_installs_gradio_only_when_needed(monkeypatch, gradio_version):
+    from diffusion_lm import demo
+
+    def version(name):
+        assert name == "gradio"
+        if gradio_version is None:
+            raise importlib.metadata.PackageNotFoundError(name)
+        return gradio_version
+
+    monkeypatch.setattr(importlib.metadata, "version", version)
+    monkeypatch.setattr(importlib, "reload", lambda module: module)
+    launches = []
+    monkeypatch.setattr(demo, "InferenceDemo", lambda run: SimpleNamespace(
+        launch=lambda **kwargs: launches.append(kwargs),
+    ))
+    commands = []
+    monkeypatch.setattr(subprocess, "run", lambda command, **kwargs: commands.append(command))
+    exec(compile(code_cell("inference_demo = demo_helpers.InferenceDemo"), "notebook-demo", "exec"), {"run_dir": ROOT})
+    assert commands == ([] if gradio_version in {"6.0.0", "6.17.3"} else [[
+        sys.executable, "-m", "pip", "install", "--prefer-binary", "gradio>=6,<7",
+    ]])
+    assert launches == [{"share": True, "inline": False}]
 
 
 @pytest.mark.parametrize("present", [[], ["transformer-engine-cu13"], [
