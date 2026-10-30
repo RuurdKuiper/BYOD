@@ -45,7 +45,8 @@ def load_training_config(
             )
         # Keep the complete 25k-update recipe and dataset budget. Quick mode
         # reduces memory through the smaller backbone and rank-128 adapters;
-        # FP16 is used because common Colab T4 GPUs do not support BF16.
+        # FP16 supports older Colab GPUs; Gemma overrides it with automatic
+        # BF16/FP32 selection to avoid its FP16 activation overflows.
         quick_output_name = quick_preset.pop("output_name")
         config.update(yaml.safe_load((ROOT / "configs" / "quick.yaml").read_text()))
         config.update(quick_preset)

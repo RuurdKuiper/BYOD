@@ -17,7 +17,7 @@ from transformers import AutoTokenizer, get_polynomial_decay_schedule_with_warmu
 
 from .data import DenoisingCollator
 from .loss import masked_denoising_loss, selected_denoising_loss
-from .modeling import forward_bidirectional, forward_bidirectional_selected, load_denoising_model, parameter_audit
+from .modeling import forward_bidirectional, forward_bidirectional_selected, load_denoising_model, parameter_audit, _resolve_training_precision
 from .inference import InferenceSession, _native_eot_token_id, llada_generate
 from .generation_prompts import DEFAULT_GENERATION_PROMPTS, _load_generation_prompts
 from .metrics import distinct_n
@@ -55,6 +55,20 @@ def _worker_count(requested: int) -> int:
     except (AttributeError, OSError, NotImplementedError):
         available = os.cpu_count() or 1
     return min(requested, max(1, available))
+
+
+def _require_finite_loss(loss: torch.Tensor, stage: str, step: int | None = None, accelerator=None) -> None:
+    """Stop before invalid losses can corrupt updates or checkpoint selection."""
+    finite = torch.isfinite(loss.detach()).to(torch.int32)
+    processes = accelerator.num_processes if accelerator is not None else 1
+    if processes > 1:
+        finite = accelerator.reduce(finite, reduction="sum")
+    if finite.item() != processes:
+        location = f" at update {step}" if step is not None else ""
+        raise FloatingPointError(
+            f"Non-finite {stage} loss{location}. Training stopped; use BF16 on a supported GPU "
+            "or FP32, and check the learning rate and input data. The saved best adapter is preserved."
+        )
 
 
 def _loader(dataset, collator, batch_size, shuffle, seed, workers, prefetch_factor=4):
@@ -321,6 +335,7 @@ def evaluate(model, loader, accelerator, mode: str, all_tokens: bool = False, eo
             answer_mask=batch["answer_mask"], padding_mask=batch["padding_mask"],
             token_weights=batch.get("token_loss_weights") if t is not None else None,
         )
+        _require_finite_loss(loss, "evaluation", accelerator=accelerator)
         valid = int(m["valid_examples"])
         tokens = int(m["supervised_tokens"])
         totals["weighted_loss_sum"] += float(loss) * valid
@@ -433,9 +448,10 @@ def run_training(config: dict[str, Any]) -> dict[str, Any]:
         if configured_updates_hint < 1:
             raise ValueError("max_updates must be a positive number of gradient updates")
         train_sample_limit = (configured_updates_hint + resume_data_updates) * int(config.get("gradient_accumulation_steps", 1)) * int(config.get("batch_size", 1))
-    precision = str(config.get("precision", "bf16")).lower()
-    if precision not in {"fp16", "bf16", "fp32"}:
-        raise ValueError("precision must be fp16, bf16, or fp32")
+    precision = _resolve_training_precision(config)
+    if str(config.get("precision", "bf16")).lower() == "auto":
+        print(f"Automatic training precision: {precision.upper()}", flush=True)
+    config["precision"] = precision
     accelerator = Accelerator(
         gradient_accumulation_steps=int(config.get("gradient_accumulation_steps", 1)),
         mixed_precision="no" if precision == "fp32" else precision,
@@ -611,6 +627,7 @@ def run_training(config: dict[str, Any]) -> dict[str, Any]:
                         answer_padding_weights=answer_padding_weights,
                         answer_mask=batch["answer_mask"], padding_mask=batch["padding_mask"],
                     )
+                _require_finite_loss(loss, "training", update_step + 1, accelerator)
                 accelerator.backward(loss)
                 # Clip only after all gradient-accumulation microbatches have
                 # contributed, matching Trainer's max_grad_norm behavior.

@@ -114,7 +114,9 @@ def test_graph_reuses_one_image_and_follows_validation_without_losing_points(mon
     assert view.plot_display.value != first_png  # Always refresh after validation.
     assert list(axis.lines[0].get_xdata()) == [1, 2]
     assert list(axis.lines[1].get_ydata()) == [1.2]
-    assert 0 < axis.get_ylim()[0] < 1.2 < axis.get_ylim()[1] < 2
+    assert axis.get_ylim() == pytest.approx((.2, 2.2))
+    view.record({"split": "validation", "step": 2, "weighted_loss": float("nan")})
+    assert axis.get_ylim() == pytest.approx((.2, 2.2))
     limits = axis.get_ylim()
     clock[0] = 6.0
     view.record({"split": "train", "step": 3, "weighted_loss": 1000.0})
@@ -122,7 +124,7 @@ def test_graph_reuses_one_image_and_follows_validation_without_losing_points(mon
     assert list(axis.lines[0].get_ydata()) == [100.0, 1.0, 1000.0]
     view.record({"split": "train_interval", "step": 3, "weighted_loss": 1.5})
     view.record({"split": "validation", "step": 4, "weighted_loss": .8})
-    assert axis.get_ylim()[0] < .8 < 1.2 < axis.get_ylim()[1] < 2
+    assert axis.get_ylim() == pytest.approx((-.2, 2.2))
     view.record({"split": "train", "step": 5, "weighted_loss": 1.0})
     assert list(axis.lines[0].get_xdata()) == [1, 2, 3, 5]  # Final update bypasses throttle.
     assert displayed == [view.status_display, view.plot_display]

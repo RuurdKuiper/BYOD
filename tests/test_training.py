@@ -294,3 +294,40 @@ def test_shipped_generation_budgets_match_the_64_token_diagnostic(model, mode):
 def test_invalid_generation_budgets_fail_before_sampling(budgets):
     with pytest.raises(ValueError, match="Generation requires"):
         _generation_inference_settings({"generation_perplexity": budgets})
+
+
+@pytest.mark.parametrize(("cuda", "bf16", "expected"), [
+    (True, True, "bf16"), (True, False, "fp32"), (False, False, "fp32"),
+])
+def test_auto_precision_avoids_fp16_overflow(monkeypatch, cuda, bf16, expected):
+    from diffusion_lm.training import _resolve_training_precision
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: cuda)
+    monkeypatch.setattr(torch.cuda, "is_bf16_supported", lambda: bf16)
+    assert _resolve_training_precision({"precision": "auto"}) == expected
+    for explicit in ("bf16", "fp16", "fp32"):
+        assert _resolve_training_precision({"precision": explicit}) == explicit
+
+
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), -float("inf")])
+def test_nonfinite_losses_stop_before_optimizer_update(value):
+    from diffusion_lm.training import _require_finite_loss
+    parameter = torch.nn.Parameter(torch.tensor(1.0))
+    optimizer = torch.optim.AdamW([parameter], lr=.01)
+    with pytest.raises(FloatingPointError, match="Non-finite training loss at update 17"):
+        loss = parameter * value
+        _require_finite_loss(loss, "training", 17)
+        loss.backward()
+        optimizer.step()
+    assert parameter.item() == 1.0
+    assert not optimizer.state
+    _require_finite_loss(torch.tensor(0.0), "training", 18)
+    with pytest.raises(FloatingPointError, match="Non-finite evaluation loss"):
+        _require_finite_loss(torch.tensor(value), "evaluation")
+
+
+def test_nonfinite_loss_on_another_rank_stops_all_ranks():
+    from types import SimpleNamespace
+    from diffusion_lm.training import _require_finite_loss
+    accelerator = SimpleNamespace(num_processes=2, reduce=lambda value, reduction: torch.tensor(1))
+    with pytest.raises(FloatingPointError, match="Non-finite training loss"):
+        _require_finite_loss(torch.tensor(1.0), "training", 1, accelerator)

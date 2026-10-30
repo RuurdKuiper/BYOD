@@ -78,10 +78,20 @@ def parameter_audit(model: torch.nn.Module) -> dict[str, Any]:
     return {"lora_parameters": categories["lora"], "normalization_parameters": categories["norm"], "other_trainable_parameters": categories["other"], "total_trainable_parameters": trainable_count, "total_model_parameters": total, "trainable_percentage": 100 * trainable_count / total, "trainable_names": [n for n, _ in trainable]}
 
 
+def _resolve_training_precision(config: dict[str, Any]) -> str:
+    """Resolve the wider numeric range required by the quick Gemma preset."""
+    precision = str(config.get("precision", "bf16")).lower()
+    if precision == "auto":
+        return "bf16" if torch.cuda.is_available() and torch.cuda.is_bf16_supported() else "fp32"
+    if precision not in {"fp16", "bf16", "fp32"}:
+        raise ValueError("precision must be auto, fp16, bf16, or fp32")
+    return precision
+
+
 def load_denoising_model(config: dict[str, Any]) -> tuple[torch.nn.Module, dict[str, Any]]:
     """Load a base CausalLM, attach LoRA, unfreeze norms, and audit it."""
     checkpoint = config["model_name_or_path"]
-    precision = config.get("precision", "bf16")
+    precision = _resolve_training_precision(config)
     dtype = {"fp16": torch.float16, "bf16": torch.bfloat16, "fp32": torch.float32}.get(precision)
     if dtype is None:
         raise ValueError(f"Unknown precision {precision}")

@@ -103,7 +103,7 @@ class _TrainingDisplay:
                       if math.isfinite(r["weighted_loss"])]
         if losses:
             low, high = min(losses), max(losses)
-            padding = max((high - low) * .1, abs(low) * .05, .01)
+            padding = max((high - low) * .1, abs(low) * .05, 1.0)
             axis.set_ylim(low - padding, high + padding)
         figure.tight_layout()
         with BytesIO() as image:

@@ -27,6 +27,9 @@ gemma:
     output_name: gemma-3-1b-mask
     prepared_dataset_config: gemma-3-1b-it
     model_name_or_path: google/gemma-3-1b-it
+    # Gemma's activations can overflow FP16. Use BF16 on supported GPUs,
+    # otherwise FP32 (which needs more VRAM).
+    precision: auto
     tokenizer_name_or_path: google/gemma-3-1b-it
     model_revision: dcc83ea841ab6100d6b47a070329e1ba4cf78752
 

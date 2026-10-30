@@ -207,3 +207,8 @@ def test_custom_config_cli_is_forwarded(tmp_path, monkeypatch):
     monkeypatch.setattr(sys, "argv", ["train.py", "--model", "llama", "--mode", "quick", "--config", str(path)])
     train.main()
     assert configs[0]["learning_rate"] == .0002
+
+
+def test_quick_gemma_uses_automatic_wide_range_precision():
+    assert load_training_config("gemma", "quick")["precision"] == "auto"
+    assert load_training_config("gemma", "paper")["precision"] == "bf16"

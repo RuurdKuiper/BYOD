@@ -37,7 +37,10 @@ Training requires an NVIDIA GPU. Use `--max-updates 2` for a short smoke run.
 Both modes default to 25,000 updates. Quick mode uses smaller models and
 rank-128 LoRA; paper mode uses rank-1024 LoRA and needs a high-memory GPU
 (the original runs used 96 GB). Quick mode does not reproduce the paper scores.
-This version uses FP16/BF16 training without FP8.
+This version uses FP16/BF16 training without FP8. Quick Gemma uses BF16 on
+supported GPUs and FP32 otherwise to avoid FP16 overflow; the FP32 fallback
+needs more GPU memory. Training stops with an explicit error if a training or
+validation loss is NaN or infinite, preserving any previously saved best adapter.
 
 Training downloads the matching [pretokenized dataset](https://huggingface.co/datasets/Ruurd/BYOD-tokenized-256)
 automatically. Each profile covers the default 400,000-example training budget.
