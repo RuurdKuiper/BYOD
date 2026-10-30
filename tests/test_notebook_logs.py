@@ -87,36 +87,47 @@ def test_trainer_emits_metric_event_only_for_notebook_training(tmp_path, monkeyp
     assert len(path.read_text().splitlines()) == 2
 
 
-def test_graph_keeps_all_loss_points_without_clearing_log_output(monkeypatch):
-    import matplotlib
-    matplotlib.use("Agg")
-    from matplotlib.figure import Figure
+def test_graph_reuses_one_image_and_follows_validation_without_losing_points(monkeypatch):
     import IPython.display
 
-    class PlotOutput:
-        clears = 0
-        def clear_output(self, **kwargs):
-            self.clears += 1
-        def __enter__(self):
-            return self
-        def __exit__(self, *args):
-            pass
+    class PlotImage:
+        def __init__(self, **kwargs):
+            self.value = b""
 
     monkeypatch.setitem(sys.modules, "ipywidgets", SimpleNamespace(
-        HTML=lambda value: SimpleNamespace(value=value), Output=PlotOutput))
-    figures = []
-    monkeypatch.setattr(IPython.display, "display", lambda *objects: figures.extend(
-        o for o in objects if isinstance(o, Figure)))
-    view = notebook._TrainingDisplay(3)
-    for step, loss in ((1, 2.0), (2, 1.0)):
-        view.record({"split": "train", "step": step, "weighted_loss": loss})
+        HTML=lambda value: SimpleNamespace(value=value), Image=PlotImage))
+    displayed = []
+    monkeypatch.setattr(IPython.display, "display", lambda *objects: displayed.extend(objects))
+    clock = [0.0]
+    monkeypatch.setattr(notebook.time, "monotonic", lambda: clock[0])
+    view = notebook._TrainingDisplay(5)
+    view.record({"split": "train", "step": 1, "weighted_loss": 100.0})
+    figure = view._figure
+    axis = figure.axes[0]
+    first_png = view.plot_display.value
+    assert first_png.startswith(b"\x89PNG")
+    assert axis.get_ylim()[0] < 100 < axis.get_ylim()[1]
+    view.record({"split": "train", "step": 2, "weighted_loss": 1.0})
+    assert view.plot_display.value is first_png  # Record every update, throttle rendering.
     view.record({"split": "validation", "step": 2, "weighted_loss": 1.2})
-    view.record({"split": "train_interval", "step": 2, "weighted_loss": 1.5})
-    assert view.plot_display.clears == 3
-    assert len(figures) == 3
-    assert list(figures[-1].axes[0].lines[0].get_xdata()) == [1, 2]
-    assert list(figures[-1].axes[0].lines[1].get_ydata()) == [1.2]
-    assert "2/3 updates" in view.status_display.value
+    assert view._figure is figure
+    assert view.plot_display.value != first_png  # Always refresh after validation.
+    assert list(axis.lines[0].get_xdata()) == [1, 2]
+    assert list(axis.lines[1].get_ydata()) == [1.2]
+    assert 0 < axis.get_ylim()[0] < 1.2 < axis.get_ylim()[1] < 2
+    limits = axis.get_ylim()
+    clock[0] = 6.0
+    view.record({"split": "train", "step": 3, "weighted_loss": 1000.0})
+    assert axis.get_ylim() == limits
+    assert list(axis.lines[0].get_ydata()) == [100.0, 1.0, 1000.0]
+    view.record({"split": "train_interval", "step": 3, "weighted_loss": 1.5})
+    view.record({"split": "validation", "step": 4, "weighted_loss": .8})
+    assert axis.get_ylim()[0] < .8 < 1.2 < axis.get_ylim()[1] < 2
+    view.record({"split": "train", "step": 5, "weighted_loss": 1.0})
+    assert list(axis.lines[0].get_xdata()) == [1, 2, 3, 5]  # Final update bypasses throttle.
+    assert displayed == [view.status_display, view.plot_display]
+    assert len(figure.axes) == 1 and len(axis.lines) == 2
+    assert "5/5 updates" in view.status_display.value
 
 
 def test_checkpoint_selection_after_failed_or_interrupted_training(tmp_path):
